@@ -1,0 +1,60 @@
+{
+  "id": "46f4072a-52ff-4c06-b569-9050a44893d2",
+  "created_at": "2026-04-04T21:51:34.689001+00:00",
+  "updated_at": "2026-04-04T21:57:10.646751+00:00",
+  "current_patient_uuid": null,
+  "current_patient_display": null,
+  "last_intent": "create_patient",
+  "pending_clarification": null,
+  "pending_workflow": null,
+  "recent_turns": [
+    {
+      "role": "user",
+      "content": "Give me patient summary of Atishay Jain",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I need an LLM provider to be configured to process your request. Please set MEDPILOT_LLM_PROVIDER to 'openai' or 'ollama' and provide the required API keys in your .env file.",
+      "intent": "inform",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Give me patient summary of Atishay Jain",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "No patients found matching 'Give me patient summary of Atishay Jain'.",
+      "intent": "search_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Add patient : Nesh Singh, He is born at 13th June 2003 in India.",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Patient's full name : Nesh Singh\r\nHis Birthdate is 13th June 2012\r\nAdd this patient",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    }
+  ]
+}

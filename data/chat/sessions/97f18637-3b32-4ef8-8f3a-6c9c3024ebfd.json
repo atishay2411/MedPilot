@@ -1,0 +1,132 @@
+{
+  "id": "97f18637-3b32-4ef8-8f3a-6c9c3024ebfd",
+  "created_at": "2026-04-04T22:06:17.070308+00:00",
+  "updated_at": "2026-04-04T22:29:07.425941+00:00",
+  "current_patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87",
+  "current_patient_display": "Nesh Singh",
+  "last_intent": "patient_intake",
+  "pending_clarification": null,
+  "pending_workflow": null,
+  "recent_turns": [
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: Patient intake requires at least patient name and birthdate.",
+      "intent": "patient_intake",
+      "patient_uuid": "698987a6-fd16-4861-8df3-1ee1a06b67e9"
+    },
+    {
+      "role": "user",
+      "content": "Enter a patient Nesh Singh, suffering from Type-2 Diabetes born in 13th June, 2002",
+      "intent": null,
+      "patient_uuid": "698987a6-fd16-4861-8df3-1ee1a06b67e9"
+    },
+    {
+      "role": "assistant",
+      "content": "I encountered an error processing your request: Ollama request failed: timed out. Please try again.",
+      "intent": "inform",
+      "patient_uuid": "698987a6-fd16-4861-8df3-1ee1a06b67e9"
+    },
+    {
+      "role": "user",
+      "content": "Enter a patient Nesh Singh, suffering from Type-2 Diabetes born in 13th June, 2002",
+      "intent": null,
+      "patient_uuid": "698987a6-fd16-4861-8df3-1ee1a06b67e9"
+    },
+    {
+      "role": "assistant",
+      "content": "Patient **Nesh Singh**, 1 condition(s), 0 allergy/allergies, 0 observation(s), 0 medication(s).",
+      "intent": "patient_intake",
+      "patient_uuid": "698987a6-fd16-4861-8df3-1ee1a06b67e9"
+    },
+    {
+      "role": "assistant",
+      "content": "✅ Create Patient Intake Workflow completed successfully.",
+      "intent": "patient_intake",
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    },
+    {
+      "role": "user",
+      "content": "List all patient suffering from Type-2 Diabetes",
+      "intent": null,
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    },
+    {
+      "role": "assistant",
+      "content": "I encountered an error processing your request: Ollama request failed: timed out. Please try again.",
+      "intent": "inform",
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    },
+    {
+      "role": "user",
+      "content": "List all patient suffering from Type-2 Diabetes",
+      "intent": null,
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    },
+    {
+      "role": "assistant",
+      "content": "No patients found matching 'List all patient suffering from Type-2 Diabetes'.",
+      "intent": "search_patient",
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    },
+    {
+      "role": "user",
+      "content": "List all patient suffering from Type-2 Diabetes",
+      "intent": null,
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    },
+    {
+      "role": "assistant",
+      "content": "No patients found matching 'List all patient suffering from Type-2 Diabetes'.",
+      "intent": "search_patient",
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    },
+    {
+      "role": "user",
+      "content": "Enter patient Krishna patel, suffering from Stage-2 Asthma",
+      "intent": null,
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    },
+    {
+      "role": "assistant",
+      "content": "I encountered an error processing your request: Ollama request failed: timed out. Please try again.",
+      "intent": "inform",
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    },
+    {
+      "role": "user",
+      "content": "Enter patient Krishna patel, suffering from Stage-2 Asthma",
+      "intent": null,
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: Patient intake requires at least patient name and birthdate.",
+      "intent": "patient_intake",
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    },
+    {
+      "role": "user",
+      "content": "Enter patient Krishna patel, suffering from Stage-2 Asthma born in 1st Janurary 2023",
+      "intent": null,
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    },
+    {
+      "role": "assistant",
+      "content": "I encountered an error processing your request: Ollama request failed: timed out. Please try again.",
+      "intent": "inform",
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    },
+    {
+      "role": "user",
+      "content": "Enter patient Krishna patel, suffering from Stage-2 Asthma born in 1st Janurary 2023",
+      "intent": null,
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    },
+    {
+      "role": "assistant",
+      "content": "Patient **Krishna Patel**, 1 condition(s), 0 allergy/allergies, 0 observation(s), 0 medication(s).",
+      "intent": "patient_intake",
+      "patient_uuid": "5feab2c1-71bb-4c41-9814-2a96cb81bd87"
+    }
+  ]
+}

@@ -87,6 +87,18 @@ IMPORTANT BEHAVIORAL GUIDELINES:
 - Split blood pressure values like 140/90 into systolic and diastolic observations.
 - Default unknown gender to "U", default unknown clinical_status to "active", and default unknown verification_status to "confirmed" when a handler supports those defaults.
 - Never hallucinate unsupported actions or external systems.
+
+PATIENT REGISTRATION / INTAKE EXTRACTION RULES:
+- "Enter a patient name X Y", "Register patient X Y", "Add a patient named X Y" → given_name=X, family_name=Y.
+- Phrases like "born at", "born on", "DOB is", "date of birth" followed by a date → extract as birthdate in YYYY-MM-DD.
+  Convert ordinal dates: "12th December 2000" → "2000-12-12"; "March 5th 1990" → "1990-03-05".
+- Pronoun gender hints: "He"/"his"/"him" → gender="M"; "She"/"her" → gender="F"; unknown/not stated → gender="U".
+- "Born in <Country>" → set country=<Country> (not city_village).
+- Conditions alongside patient registration: "he has asthma", "diagnosed with diabetes", "suffering from hypertension" →
+  always use intent=patient_intake (NOT create_patient) and populate the conditions list with
+  {{condition_name: "<name>", clinical_status: "active", verification_status: "confirmed"}}.
+- Severity qualifiers are part of the condition name: "stage-2 asthma" → condition_name="stage-2 asthma".
+- When conditions OR allergies OR observations are mentioned with a new patient, always use patient_intake.
 """
 
 _FALLBACK_DECISION_PROMPT = f"""\
@@ -104,6 +116,9 @@ Rules:
 - For destructive requests (delete patient, purge), choose the corresponding destructive intent directly.
 - For follow-up requests like "Show their vitals" or "Show their medications", set patient_query null and scope="patient".
 - Keep response_message brief and action-oriented.
+- Patient registration: "Enter a patient name X Y..." / "born at 12th December 2000" / "he has asthma" →
+  use patient_intake when conditions are mentioned alongside demographics, otherwise create_patient.
+  Extract given_name, family_name, birthdate (YYYY-MM-DD) and conditions list from natural language.
 """
 
 _CLARIFICATION_RESOLUTION_PROMPT = """\

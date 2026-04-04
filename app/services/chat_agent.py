@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,59 @@ from app.services.pending_actions import PendingActionStore
 from app.services.population import PopulationService
 from app.services.summaries import SummaryService
 from app.services.utils import now_iso
+
+# ---------------------------------------------------------------------------
+# Module-level compiled regexes for deterministic patient-creation enrichment
+# ---------------------------------------------------------------------------
+
+_NAME_CREATION_PATTERNS = (
+    re.compile(
+        r"(?:enter|add|register|create|admit|intake)\s+(?:a\s+)?patient\s+(?:name[d]?\s+)?"
+        r"([A-Z][a-zA-Z'\-]*)\s+([A-Z][a-zA-Z'\-]*)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bpatient\s+(?:name[d]?\s+)?([A-Z][a-zA-Z'\-]*)\s+([A-Z][a-zA-Z'\-]*)",
+        re.IGNORECASE,
+    ),
+)
+
+_MONTH_MAP: dict[str, str] = {
+    "january": "01", "february": "02", "march": "03", "april": "04",
+    "may": "05", "june": "06", "july": "07", "august": "08",
+    "september": "09", "october": "10", "november": "11", "december": "12",
+    "jan": "01", "feb": "02", "mar": "03", "apr": "04", "jun": "06",
+    "jul": "07", "aug": "08", "sep": "09", "oct": "10", "nov": "11", "dec": "12",
+}
+
+_MONTH_NAMES = "|".join(_MONTH_MAP)
+
+_BIRTHDATE_DMY = re.compile(
+    rf"(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_NAMES})[,\s]+(\d{{4}})",
+    re.IGNORECASE,
+)
+_BIRTHDATE_MDY = re.compile(
+    rf"({_MONTH_NAMES})\s+(\d{{1,2}})(?:st|nd|rd|th)?\s*,?\s*(\d{{4}})",
+    re.IGNORECASE,
+)
+_BIRTHDATE_ISO = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+
+_CONDITION_PATTERN = re.compile(
+    r"(?:has|have|suffering\s+from|diagnosed\s+with|presenting\s+with|history\s+of)\s+"
+    r"([A-Za-z][A-Za-z0-9\s\-]*)",
+    re.IGNORECASE,
+)
+
+_COUNTRY_BORN_PATTERN = re.compile(
+    r"born\s+in\s+([A-Z][a-zA-Z\s]+?)(?:[,.]|\s+and|\s+he|\s+she|\s+who|$)",
+    re.IGNORECASE,
+)
+
+# Phrases that indicate patient creation even when the LLM misses the intent
+_PATIENT_CREATION_PHRASES = (
+    "patient name", "register patient", "add patient", "create patient",
+    "enter patient", "admit patient", "new patient", "intake patient",
+)
 
 
 class ChatAgentService:
@@ -100,6 +154,20 @@ class ChatAgentService:
                 session_state=session.snapshot(),
                 has_file=bool(attachment_path),
             )
+
+        # ── Pass 3 (deterministic): entity enrichment for patient-creation intents ──
+        # Handles natural-language phrasing the LLM frequently misses:
+        #   "Enter a patient name Sahil Singh"  →  given_name/family_name
+        #   "born at 12th December 2000"        →  birthdate (YYYY-MM-DD)
+        #   "He is born in India"               →  country
+        #   "he has stage-2 asthma"             →  conditions list
+        # Also upgrades intent create_patient → patient_intake when conditions are
+        # present, and upgrades mode clarify → action when all required fields are met.
+        if decision.intent in ("create_patient", "patient_intake") or (
+            decision.mode in ("action", "clarify")
+            and self._looks_like_patient_creation(prompt)
+        ):
+            decision = self._enrich_patient_creation_decision(prompt, decision)
 
         # ── Clarification resolution (when a slot is in-flight) ───────
         has_pending = bool(session.pending_workflow or session.pending_clarification)
@@ -369,6 +437,135 @@ class ChatAgentService:
         return bool(intent and get_capability(intent))
 
     @staticmethod
+    def _looks_like_patient_creation(prompt: str) -> bool:
+        """Return True when the prompt is clearly about registering a new patient."""
+        lower = prompt.lower()
+        return any(phrase in lower for phrase in _PATIENT_CREATION_PHRASES)
+
+    @staticmethod
+    def _enrich_patient_creation_decision(
+        prompt: str,
+        decision: "ConversationalDecision",
+    ) -> "ConversationalDecision":
+        """Deterministic enricher for patient create/intake decisions.
+
+        Fills entity gaps left by the LLM when conversational phrasing is used,
+        then upgrades intent (create_patient → patient_intake) and mode
+        (clarify → action) when all required registration fields are satisfied.
+        Does NOT overwrite values already correctly extracted by the LLM.
+        """
+        from app.services.llm_reasoning import ConversationalDecision  # local import avoids circular
+
+        entities: dict[str, Any] = dict(decision.entities or {})
+        changed = False
+
+        # ── 1. Given / family name ────────────────────────────────────────
+        if not (entities.get("given_name") and entities.get("family_name")):
+            for pat in _NAME_CREATION_PATTERNS:
+                m = pat.search(prompt)
+                if m:
+                    if not entities.get("given_name"):
+                        entities["given_name"] = m.group(1).strip().title()
+                        changed = True
+                    if not entities.get("family_name"):
+                        entities["family_name"] = m.group(2).strip().title()
+                        changed = True
+                    break
+
+        # ── 2. Birthdate ──────────────────────────────────────────────────
+        if not entities.get("birthdate"):
+            m = _BIRTHDATE_DMY.search(prompt)
+            if m:
+                day, mon, year = m.group(1), m.group(2).lower(), m.group(3)
+                entities["birthdate"] = f"{year}-{_MONTH_MAP.get(mon, '01')}-{day.zfill(2)}"
+                changed = True
+            else:
+                m = _BIRTHDATE_MDY.search(prompt)
+                if m:
+                    mon, day, year = m.group(1).lower(), m.group(2), m.group(3)
+                    entities["birthdate"] = f"{year}-{_MONTH_MAP.get(mon, '01')}-{day.zfill(2)}"
+                    changed = True
+                else:
+                    m = _BIRTHDATE_ISO.search(prompt)
+                    if m:
+                        entities["birthdate"] = m.group(0)
+                        changed = True
+
+        # ── 3. Gender from pronouns ───────────────────────────────────────
+        if not entities.get("gender"):
+            if re.search(r'\bhe\b|\bhis\b|\bhim\b', prompt, re.IGNORECASE):
+                entities["gender"] = "M"
+            elif re.search(r'\bshe\b|\bher\b', prompt, re.IGNORECASE):
+                entities["gender"] = "F"
+            else:
+                entities["gender"] = "U"
+            changed = True
+
+        # ── 4. Country from "born in <Country>" ───────────────────────────
+        if not entities.get("country"):
+            m = _COUNTRY_BORN_PATTERN.search(prompt)
+            if m:
+                entities["country"] = m.group(1).strip().title()
+                changed = True
+
+        # ── 5. Conditions from "has/diagnosed with X" ─────────────────────
+        if not entities.get("conditions"):
+            conditions: list[dict[str, Any]] = []
+            seen: set[str] = set()
+            for m in _CONDITION_PATTERN.finditer(prompt):
+                raw = m.group(1).strip()
+                # Stop at sentence boundaries and trailing conjunctions
+                raw = re.split(r'[.!?]', raw)[0]
+                # Stop at 'born' keyword (e.g. "Type-2 Diabetes born in India" → "Type-2 Diabetes")
+                raw = re.sub(r'\s+born\b.*$', '', raw, flags=re.IGNORECASE)
+                raw = re.sub(r'\s+(and|or|but|while|who|that)\b.*$', '', raw, flags=re.IGNORECASE).strip().rstrip(".,;:")
+                key = raw.lower()
+                # Skip single-word false positives that aren't clinical terms
+                skip = {"no", "not", "none", "never", "a", "an", "the", "born", "india", "pakistan"}
+                if raw and len(raw) > 2 and key not in seen and key not in skip:
+                    conditions.append({
+                        "condition_name": raw,
+                        "clinical_status": "active",
+                        "verification_status": "confirmed",
+                    })
+                    seen.add(key)
+            if conditions:
+                entities["conditions"] = conditions
+                changed = True
+
+        if not changed:
+            return decision
+
+        # ── 6. Upgrade intent: create_patient → patient_intake when conditions present
+        intent = decision.intent or "patient_intake"
+        if intent == "create_patient" and entities.get("conditions"):
+            intent = "patient_intake"
+        # Ensure a valid creation intent is set
+        if intent not in ("create_patient", "patient_intake"):
+            intent = "patient_intake" if entities.get("conditions") else "create_patient"
+
+        # ── 7. Upgrade mode: clarify → action when required fields are now present
+        mode = decision.mode
+        if mode == "clarify" and all([
+            entities.get("given_name"),
+            entities.get("family_name"),
+            entities.get("birthdate"),
+        ]):
+            mode = "action"
+
+        return ConversationalDecision(
+            mode=mode,
+            intent=intent,
+            write=True,
+            confidence=decision.confidence,
+            scope="global",
+            entities=entities,
+            missing_fields=[] if mode == "action" else list(decision.missing_fields or []),
+            clarifying_question=None if mode == "action" else decision.clarifying_question,
+            response_message=decision.response_message,
+        )
+
+    @staticmethod
     def _build_pending_workflow_state(
         prompt: str,
         session: ChatSessionRecord,
@@ -606,7 +803,14 @@ class ChatAgentService:
         ensure_permission(actor, "write:patient")
         if not all([entities.get("given_name"), entities.get("family_name"), entities.get("birthdate")]):
             raise ValidationError("I need the patient's full name and birthdate to register them. Could you provide those details?")
-        registration = PatientRegistration(**{k: v for k, v in entities.items() if k in PatientRegistration.model_fields})
+        registration = PatientRegistration(
+            given_name=entities["given_name"],
+            family_name=entities["family_name"],
+            gender=entities.get("gender", "U"),
+            birthdate=entities["birthdate"],
+            city_village=entities.get("city_village"),
+            country=entities.get("country"),
+        )
         payload = self.patients.build_create_payload(registration)
         duplicates = self.patients.find_duplicate_candidates(registration)
         session = _.get("session")
@@ -746,6 +950,7 @@ class ChatAgentService:
             gender=entities.get("gender", "U"),
             birthdate=entities["birthdate"],
             city_village=entities.get("city_village"),
+            country=entities.get("country"),
         )
         patient_payload = self.patients.build_create_payload(registration)
         duplicates = self.patients.find_duplicate_candidates(registration)
@@ -770,23 +975,33 @@ class ChatAgentService:
 
         workflow.append(WorkflowStep(status="completed", title="Intake planned", detail=self._describe_intake_entities(entities)))
         session = _.get("session")
+
+        # Clinical entities extracted from the prompt (may be empty lists)
+        clinical_data = {
+            "conditions": entities.get("conditions", []),
+            "allergies": entities.get("allergies", []),
+            "observations": entities.get("observations", []),
+            "medications": entities.get("medications", []),
+            "dispenses": entities.get("dispenses", []),
+        }
+
         pending = self.pending_store.create(
             action_kind="workflow",
             intent="patient_intake",
             action="Create Patient Intake Workflow",
             permission="write:patient",
             endpoint="POST /patient + multi-entity clinical writes",
-            payload={"patient_payload": patient_payload},
+            # payload is what the user sees in the preview; include the full picture
+            payload={
+                "patient_payload": patient_payload,
+                "clinical_data": clinical_data,
+            },
             prompt=prompt,
             session_id=session.id if session else None,
             metadata={
                 "registration": registration.model_dump(),
                 "duplicate_warnings": duplicates,
-                "conditions": entities.get("conditions", []),
-                "allergies": entities.get("allergies", []),
-                "observations": entities.get("observations", []),
-                "medications": entities.get("medications", []),
-                "dispenses": entities.get("dispenses", []),
+                **clinical_data,
                 "encounter_payload": encounter_payload,
             },
         )
