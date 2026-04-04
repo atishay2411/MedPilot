@@ -223,7 +223,16 @@ class ChatAgentService:
         elif record.intent == "create_encounter":
             result = self.encounters.create_rest(record.payload)
         elif record.intent == "create_condition":
-            result = self.conditions.create(record.payload)
+            if "conditions" in record.payload:
+                # Bulk mode
+                result = []
+                for cond_payload in record.payload["conditions"]:
+                    try:
+                        result.append(self.conditions.create(cond_payload))
+                    except Exception as exc:
+                        result.append({"error": str(exc)})
+            else:
+                result = self.conditions.create(record.payload)
         elif record.intent == "update_condition":
             result = self.conditions.patch_status(record.payload["condition_uuid"], record.payload["status"])
         elif record.intent == "delete_condition":
@@ -835,25 +844,72 @@ class ChatAgentService:
     def _handle_create_condition(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:condition")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
-        payload = self.conditions.build_create_payload(
-            context["uuid"],
-            entities.get("condition_name", ""),
-            entities.get("clinical_status", "active"),
-            entities.get("verification_status", "confirmed"),
-            entities.get("onset_date"),
-        )
-        pending = self.pending_store.create(
-            action_kind="write", intent="create_condition", action="Create Condition",
-            permission="write:condition", endpoint="POST /ws/rest/v1/condition",
-            payload=payload, patient_uuid=context["uuid"], prompt=prompt,
-            session_id=None,
-        )
-        return self._preview_response(
-            intent="create_condition",
-            message=f"Prepared to add **{entities.get('condition_name')}** for {context['display']}.",
-            workflow=workflow, pending=pending, patient_context=context,
-            summary=f"{entities.get('condition_name')} — status: {entities.get('clinical_status', 'active')}.",
-        )
+
+        # Bulk mode: conditions is a list of names
+        condition_list: list[str] = []
+        if entities.get("conditions") and isinstance(entities["conditions"], list):
+            condition_list = [str(c).strip() for c in entities["conditions"] if str(c).strip()]
+        elif entities.get("condition_name"):
+            condition_list = [entities["condition_name"]]
+
+        if not condition_list:
+            raise ValidationError("Please specify at least one condition name to add.")
+
+        if len(condition_list) == 1:
+            # Single condition — show confirmation preview
+            payload = self.conditions.build_create_payload(
+                context["uuid"],
+                condition_list[0],
+                entities.get("clinical_status", "active"),
+                entities.get("verification_status", "confirmed"),
+                entities.get("onset_date"),
+            )
+            pending = self.pending_store.create(
+                action_kind="write", intent="create_condition", action="Create Condition",
+                permission="write:condition", endpoint="POST /ws/rest/v1/condition",
+                payload=payload, patient_uuid=context["uuid"], prompt=prompt,
+                session_id=None,
+            )
+            return self._preview_response(
+                intent="create_condition",
+                message=f"Prepared to add **{condition_list[0]}** for {context['display']}.",
+                workflow=workflow, pending=pending, patient_context=context,
+                summary=f"{condition_list[0]} — status: {entities.get('clinical_status', 'active')}.",
+            )
+        else:
+            # Bulk mode — build one pending record per condition
+            payloads = []
+            for name in condition_list:
+                try:
+                    payloads.append(self.conditions.build_create_payload(
+                        context["uuid"], name,
+                        entities.get("clinical_status", "active"),
+                        entities.get("verification_status", "confirmed"),
+                        entities.get("onset_date"),
+                    ))
+                except ValidationError as exc:
+                    workflow.append(WorkflowStep(status="blocked", title=f"Skip: {name}", detail=str(exc)))
+
+            if not payloads:
+                raise ValidationError("None of the specified conditions could be resolved.")
+
+            pending = self.pending_store.create(
+                action_kind="workflow", intent="create_condition",
+                action=f"Create {len(payloads)} Condition(s)",
+                permission="write:condition", endpoint="POST /ws/rest/v1/condition (×" + str(len(payloads)) + ")",
+                payload={"conditions": payloads}, patient_uuid=context["uuid"], prompt=prompt,
+                session_id=None,
+                metadata={"condition_names": condition_list, "resolved_count": len(payloads)},
+            )
+            skipped = len(condition_list) - len(payloads)
+            names_str = ", ".join(f"**{n}**" for n in condition_list[:len(payloads)])
+            skip_note = f" ({skipped} skipped — not found in OpenMRS)" if skipped else ""
+            return self._preview_response(
+                intent="create_condition",
+                message=f"Prepared to add {len(payloads)} condition(s) for {context['display']}: {names_str}{skip_note}.",
+                workflow=workflow, pending=pending, patient_context=context,
+                summary=f"Bulk conditions: {', '.join(condition_list[:len(payloads)])} — status: {entities.get('clinical_status', 'active')}.",
+            )
 
     def _handle_update_condition(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:condition")

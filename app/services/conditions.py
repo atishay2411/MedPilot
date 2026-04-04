@@ -18,7 +18,7 @@ class ConditionService:
     def build_create_payload(self, patient_uuid: str, condition_name: str, clinical_status: str, verification_status: str, onset_date: str | None) -> dict[str, Any]:
         return {
             "patient": patient_uuid,
-            "condition": {"coded": self.lookups.resolve_uuid("concept", condition_name)},
+            "condition": {"coded": self.resolve_or_create_concept_uuid(condition_name)},
             "clinicalStatus": clinical_status,
             "verificationStatus": verification_status,
             "onsetDate": onset_date,

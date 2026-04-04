@@ -10,11 +10,13 @@ const welcomeScreen = document.getElementById("welcome-screen");
 const state = {
   hasMessages: false,
   conversationHistory: [], // [{role: "user"|"assistant", content: "..."}]
+  currentPatientUuid: "",
 };
 
 function newChat() {
   state.hasMessages = false;
   state.conversationHistory = [];
+  state.currentPatientUuid = "";
   transcriptEl.innerHTML = "";
   showWelcome();
 }
@@ -144,6 +146,10 @@ function renderPendingAction(pendingAction) {
 }
 
 function renderAssistantResponse(payload) {
+  const patientContext = payload.patient_context;
+  if (patientContext?.uuid) {
+    state.currentPatientUuid = patientContext.uuid;
+  }
 
   const intentBadge = payload.intent && !["inform", "clarify"].includes(payload.intent)
     ? `<span class="intent-badge">${escapeHtml(payload.intent)}</span>`
@@ -174,6 +180,9 @@ async function sendChat(prompt, file = null) {
     formData.append("history", JSON.stringify(state.conversationHistory.slice(-14)));
   }
   if (file) formData.append("file", file);
+  if (state.currentPatientUuid) {
+    formData.append("patient_uuid", state.currentPatientUuid);
+  }
 
   const response = await fetch("/api/chat", { method: "POST", body: formData });
   const payload = await response.json();

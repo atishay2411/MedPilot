@@ -138,10 +138,11 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition(
         intent="create_condition",
         handler_name="_handle_create_condition",
-        summary="Create a condition/problem list entry for a patient.",
+        summary="Create one or more conditions/problem list entries for a patient.",
         fields=(
             CapabilityField("patient_query", "Optional patient search term.", required=False),
-            CapabilityField("condition_name", "Condition or diagnosis name.", required=True),
+            CapabilityField("condition_name", "Single condition name (use for one condition).", required=False),
+            CapabilityField("conditions", "List of condition names for bulk adding.", required=False),
             CapabilityField("clinical_status", "Condition clinical status.", required=False),
             CapabilityField("verification_status", "Condition verification status.", required=False),
             CapabilityField("onset_date", "Optional onset date in YYYY-MM-DD.", required=False),

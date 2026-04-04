@@ -87,6 +87,7 @@ OBSERVATION RECORDING RULES:
 
 CLINICAL WRITE RULES:
 - create_condition: condition_name is required. clinical_status defaults to "active", verification_status defaults to "confirmed".
+- create_condition bulk: when user lists multiple conditions (e.g. "Add conditions: Fever, Cough, Cold"), use intent=create_condition with entities.conditions=["Fever","Cough","Cold"]. Do NOT split into separate messages.
 - create_allergy: allergen_name required. severity defaults to "moderate". reaction defaults to "rash".
 - create_medication: drug_name, dose, dose_units_name, route_name, frequency_name, duration, duration_units_name, quantity, quantity_units_name all required.
 - delete operations: always resolve the patient first via patient_query.
