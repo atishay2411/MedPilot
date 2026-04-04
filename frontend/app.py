@@ -28,13 +28,11 @@ st.markdown("""
 
     .stApp { background: linear-gradient(135deg, #0f1117 0%, #1a1f2e 100%); }
 
-    /* Sidebar */
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #1a1f2e 0%, #0f1117 100%);
         border-right: 1px solid #2d3748;
     }
 
-    /* Chat input */
     [data-testid="stChatInput"] input {
         background: #1e2535 !important;
         border: 1px solid #3d4a6b !important;
@@ -42,7 +40,6 @@ st.markdown("""
         color: #e0e0e0 !important;
     }
 
-    /* Chat messages */
     [data-testid="stChatMessage"] {
         background: #1e2535;
         border-radius: 12px;
@@ -50,7 +47,6 @@ st.markdown("""
         margin-bottom: 8px;
     }
 
-    /* Metric cards */
     [data-testid="stMetric"] {
         background: #1e2535;
         border: 1px solid #2d3748;
@@ -58,7 +54,6 @@ st.markdown("""
         padding: 16px;
     }
 
-    /* Buttons */
     .stButton > button {
         background: linear-gradient(135deg, #4f8ef7, #7c5cbf);
         color: white;
@@ -72,7 +67,6 @@ st.markdown("""
         box-shadow: 0 4px 15px rgba(79, 142, 247, 0.4);
     }
 
-    /* Success / Error banners */
     .success-banner {
         background: linear-gradient(135deg, #1a4731, #276749);
         border: 1px solid #38a169;
@@ -96,8 +90,6 @@ st.markdown("""
         padding: 16px;
         margin: 8px 0;
     }
-
-    /* Header */
     .medpilot-header {
         background: linear-gradient(135deg, #1a1f2e, #243047);
         border: 1px solid #3d4a6b;
@@ -121,7 +113,8 @@ if "current_patient" not in st.session_state:
     st.session_state.current_patient = None
 
 
-# ── Helper Functions ──────────────────────────────────────────────────────────
+# ── Helper Functions — defined BEFORE any page logic ─────────────────────────
+
 def api_post(endpoint: str, payload: dict):
     try:
         r = requests.post(f"{API_BASE}{endpoint}", json=payload, timeout=30)
@@ -161,6 +154,41 @@ def render_data_table(items: list, label: str):
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 
+def _render_chat_data(data):
+    """Render structured data returned from the chat API."""
+    if not data:
+        return
+    if "patients" in data:
+        patients = data["patients"]
+        if patients:
+            for p in patients[:5]:
+                render_patient_card(p)
+        else:
+            st.info("No patients found.")
+    elif "vitals" in data:
+        render_data_table(data["vitals"], "vitals")
+    elif "conditions" in data:
+        render_data_table(data["conditions"], "conditions")
+    elif "allergies" in data:
+        render_data_table(data["allergies"], "allergies")
+    elif "medications" in data:
+        render_data_table(data["medications"], "medications")
+    elif data.get("success") is True:
+        st.markdown('<div class="success-banner">✅ Action completed successfully</div>', unsafe_allow_html=True)
+    elif data.get("success") is False:
+        st.markdown(f'<div class="error-banner">❌ {data.get("error", "Unknown error")}</div>', unsafe_allow_html=True)
+
+
+def _handle_chat_response(resp: dict):
+    """Append assistant response to session message history."""
+    msg_text = resp.get("message", "Done.")
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": msg_text,
+        "data": resp.get("data")
+    })
+
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 🏥 MedPilot")
@@ -187,7 +215,7 @@ with st.sidebar:
     st.divider()
     if st.session_state.current_patient:
         p = st.session_state.current_patient
-        name = p.get("person", {}).get("display", "Unknown") if isinstance(p, dict) else p
+        name = p.get("person", {}).get("display", "Unknown") if isinstance(p, dict) else str(p)
         st.markdown(f"**Active Patient**\n\n`{name}`")
         if st.button("Clear Patient", use_container_width=True):
             st.session_state.current_patient = None
@@ -208,7 +236,6 @@ if page == "💬 Chat":
     </div>
     """, unsafe_allow_html=True)
 
-    # Example prompts
     with st.expander("💡 Example commands"):
         st.markdown("""
         - *"Search for patient John Smith"*
@@ -232,7 +259,6 @@ if page == "💬 Chat":
         col1, col2 = st.columns(2)
         with col1:
             if st.button("✅ Yes, Proceed", use_container_width=True, key="confirm_yes"):
-                # Re-send with confirmed=true
                 confirmed_messages = st.session_state.messages.copy()
                 confirmed_messages.append({
                     "role": "user",
@@ -275,39 +301,6 @@ if page == "💬 Chat":
                         "content": msg_text,
                         "data": data
                     })
-
-
-def _render_chat_data(data: dict | None):
-    if not data:
-        return
-    if "patients" in data:
-        patients = data["patients"]
-        if patients:
-            for p in patients[:5]:
-                render_patient_card(p)
-        else:
-            st.info("No patients found.")
-    elif "vitals" in data:
-        render_data_table(data["vitals"], "vitals")
-    elif "conditions" in data:
-        render_data_table(data["conditions"], "conditions")
-    elif "allergies" in data:
-        render_data_table(data["allergies"], "allergies")
-    elif "medications" in data:
-        render_data_table(data["medications"], "medications")
-    elif data.get("success") is True:
-        st.markdown('<div class="success-banner">✅ Action completed successfully</div>', unsafe_allow_html=True)
-    elif data.get("success") is False:
-        st.markdown(f'<div class="error-banner">❌ {data.get("error", "Unknown error")}</div>', unsafe_allow_html=True)
-
-
-def _handle_chat_response(resp: dict):
-    msg_text = resp.get("message", "Done.")
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": msg_text,
-        "data": resp.get("data")
-    })
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -353,7 +346,6 @@ elif page == "🔍 Patient Search":
                             meds = api_get(f"/api/medications/{uuid}")
                             render_data_table(meds.get("medications", []), "medications")
 
-                    # Allergies
                     st.subheader("Allergies")
                     al = api_get(f"/api/allergies/{uuid}")
                     render_data_table(al.get("allergies", []), "allergies")
@@ -377,12 +369,14 @@ elif page == "📄 PDF Ingest":
     </div>
     """, unsafe_allow_html=True)
 
+    # FIX: Declare patient_id at page scope so it's available to the commit section
+    patient_id = st.text_input("Target Patient ID", placeholder="e.g. 10003A6", key="ingest_patient_id")
+
     col_upload, col_preview = st.columns([1, 2])
 
     with col_upload:
         st.subheader("1. Upload PDF")
         uploaded = st.file_uploader("Patient Record PDF", type=["pdf"], label_visibility="collapsed")
-        patient_id = st.text_input("Target Patient ID", placeholder="e.g. 10003A6")
 
         if uploaded and st.button("📥 Parse PDF", use_container_width=True):
             with st.spinner("Parsing PDF with NLP..."):
@@ -439,7 +433,7 @@ elif page == "📄 PDF Ingest":
             st.subheader("3. Commit to OpenMRS")
 
             if not patient_id:
-                st.warning("⚠️ Please enter the Target Patient ID before committing.")
+                st.warning("⚠️ Please enter the Target Patient ID (above) before committing.")
             else:
                 st.warning(f"This will write the extracted data to patient **{patient_id}** in OpenMRS.")
                 if st.button("✅ Confirm & Commit to OpenMRS", use_container_width=True):
