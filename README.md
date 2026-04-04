@@ -7,6 +7,7 @@ MedPilot is a production-structured FastAPI application with a chat-first clinic
 - Full-stack application scaffold with modular backend services and a browser UI
 - Chatbot-style clinician workspace with deterministic natural-language intent parsing and agentic workflow orchestration
 - Provider-agnostic LLM adapter with OpenAI and Ollama support for intent reasoning and clinician-grade chart summarization
+- Session-based chat memory with active-patient context carry-forward and patient switching
 - OpenMRS integrations for patient search, demographics, summary, conditions, observations, allergies, medications, encounters, and population counts
 - Evidence-grounded patient analysis and summarization
 - Preview-gated write execution and destructive delete confirmation
@@ -22,6 +23,7 @@ MedPilot is a production-structured FastAPI application with a chat-first clinic
 - `app/llm/`: provider adapters and factory for OpenAI and Ollama
 - `app/services/`: domain workflows
 - `app/services/chat_agent.py`: chat orchestration and pending-action execution
+- `app/services/chat_sessions.py`: persistent chat session memory and current-patient state
 - `app/services/llm_reasoning.py`: hybrid reasoning layer that upgrades intent extraction and patient summaries
 - `app/services/prompt_parser.py`: natural-language intent and entity extraction
 - `app/parsers/`: PDF ingestion parser
@@ -70,4 +72,5 @@ Optional flags:
 - The app is designed to talk to a live OpenMRS instance like the one described in [`/Users/atishayjain/Desktop/Hackathon/scarlethacks26/openmrs/docker-compose.yml`](/Users/atishayjain/Desktop/Hackathon/scarlethacks26/openmrs/docker-compose.yml).
 - Audit logs are written to `data/audit/audit.log`.
 - The chat copilot supports natural-language search, chart summary/analysis, encounter creation, patient registration, condition/allergy workflows, vital recording, medication stop/order/dispense workflows, compound patient intake workflows, PDF ingestion, and Health Gorilla sync previews with confirmation-gated execution.
+- Chat sessions persist active patient context and recent turns, so prompts like `summarize this patient`, `record weight 80`, or `change patient to Maria Santos` can reuse and update the current chart context across follow-up turns and browser reloads.
 - The UI shows the active reasoning mode via `/api/llm/status`.

@@ -8,6 +8,7 @@ from app.llm.factory import build_llm_provider
 from app.llm.base import LLMProvider
 from app.services.allergies import AllergyService
 from app.services.chat_agent import ChatAgentService
+from app.services.chat_sessions import ChatSessionStore
 from app.services.conditions import ConditionService
 from app.services.encounters import EncounterService
 from app.services.ingestion import IngestionService
@@ -106,6 +107,11 @@ def get_llm_reasoning_service() -> LLMReasoningService:
 
 
 @lru_cache(maxsize=1)
+def get_chat_session_store() -> ChatSessionStore:
+    return ChatSessionStore(get_settings())
+
+
+@lru_cache(maxsize=1)
 def get_prompt_parser() -> PromptParser:
     return PromptParser()
 
@@ -135,6 +141,7 @@ def get_chat_agent_service() -> ChatAgentService:
     return ChatAgentService(
         get_prompt_parser(),
         get_llm_reasoning_service(),
+        get_chat_session_store(),
         get_pending_action_store(),
         get_audit_logger(),
         get_patient_service(),
