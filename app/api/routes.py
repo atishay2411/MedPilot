@@ -162,6 +162,8 @@ def execute_write(
 
     if payload.intent == "create_patient":
         response = patients.create(payload.payload)
+    elif payload.intent == "delete_patient":
+        response = patients.delete(payload.payload["patient_uuid"], purge=bool(payload.payload.get("purge")))
     elif payload.intent == "create_condition":
         response = conditions.create(payload.payload)
     elif payload.intent == "delete_condition":
@@ -185,6 +187,19 @@ def execute_write(
         )
     )
     return ApiResponse(data=response)
+
+
+@router.delete("/patients/{patient_uuid}")
+def delete_patient(
+    patient_uuid: str,
+    confirm_text: str,
+    purge: bool = False,
+    actor: Actor = Depends(get_actor),
+    service: PatientService = Depends(get_patient_service),
+) -> ApiResponse:
+    ensure_permission(actor, "delete:patient")
+    ensure_confirmation(ConfirmationRequest(confirmed=True, destructive_confirm_text=confirm_text), destructive=True)
+    return ApiResponse(data=service.delete(patient_uuid, purge=purge))
 
 
 @router.post("/encounters")

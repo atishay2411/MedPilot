@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from app.config import Settings
 from app.core.exceptions import LLMProviderError
 from app.llm.base import LLMProvider
-from app.models.domain import ParsedIntent
+from app.models.common import PendingClarificationSlot
+from app.services.capabilities import render_capability_prompt, supported_intents
 
 
 class ClinicalNarrative(BaseModel):
@@ -17,11 +18,112 @@ class ClinicalNarrative(BaseModel):
     follow_up: list[str] = Field(default_factory=list)
 
 
-class LLMIntentOutput(BaseModel):
-    intent: str
-    write: bool
-    confidence: float
+class ConversationalDecision(BaseModel):
+    mode: Literal["action", "clarify", "inform"]
+    intent: str | None = None
+    write: bool = False
+    confidence: float = 0.9
+    scope: Literal["global", "patient"] = "patient"
+    """'global' for population-level queries that should not inherit active patient context.
+    'patient' for chart-level actions that apply to a specific patient."""
     entities: dict[str, Any] = Field(default_factory=dict)
+    missing_fields: list[str] = Field(default_factory=list)
+    clarifying_question: str | None = None
+    response_message: str
+
+
+class OperationalDecision(BaseModel):
+    mode: Literal["action", "clarify"]
+    intent: str
+    write: bool = False
+    confidence: float = 0.9
+    scope: Literal["global", "patient"] = "patient"
+    entities: dict[str, Any] = Field(default_factory=dict)
+    missing_fields: list[str] = Field(default_factory=list)
+    clarifying_question: str | None = None
+    response_message: str
+
+
+_SUPPORTED_INTENTS = ", ".join(supported_intents())
+_CAPABILITY_PROMPT = render_capability_prompt()
+
+_SYSTEM_PROMPT = f"""\
+You are MedPilot, an AI clinical copilot for OpenMRS EHR. You understand natural language and help clinicians work the chart.
+
+You are already operating inside one connected MedPilot + OpenMRS environment.
+Do NOT ask which system, facility, portal, or EHR the user means.
+When the user asks to search, count, summarize, create, update, or delete something that MedPilot supports, route it directly.
+
+You are embedded in a chat interface where each user message is a free-form natural language request.
+You must interpret follow-up references like "this patient", "them", "their", or short answers to clarifying questions by using session context.
+
+RESPONSE FORMAT RULES:
+- If the request can be executed, set mode="action", choose the correct intent, and populate entities.
+- If critical data is missing, set mode="clarify", keep the intended action in intent, populate missing_fields, and ask a focused clarifying question.
+- If no system action is needed, set mode="inform" and answer naturally.
+
+SCOPE DETECTION RULES — read this carefully:
+- Set scope="global" when the request is about the patient population or system-level data, NOT about any specific patient:
+  - count_patients, search_patient (no specific patient named), get_metadata, population stats
+  - Examples: "How many patients are there?", "List all patients", "Show FHIR metadata"
+- Set scope="patient" for any clinical chart action: reading/writing vitals, conditions, allergies, medications, encounters, or any action on a named or active patient.
+- For scope="global", do NOT require an active patient. Do NOT inherit the active patient from session context.
+- For scope="patient" with pronouns like "this patient", "them", "their" — keep patient_query null and rely on the active session patient.
+
+PATIENT CONTEXT RULES:
+- If the user names a specific patient, put it in entities.patient_query (unless intent is create_patient or patient_intake).
+- For scope="global" queries, leave patient_query absent or null.
+- If there is a structured pending clarification slot in session context, treat collected_entities as authoritative and merge the new answer into missing_fields.
+
+SUPPORTED CAPABILITIES:
+{_CAPABILITY_PROMPT}
+
+IMPORTANT BEHAVIORAL GUIDELINES:
+- Be conversational, concise, and action-oriented.
+- Prefer action over clarify when the request is already operational and enough data is present.
+- Populate missing_fields whenever you choose mode="clarify".
+- Extract only the real search term for search_patient and count_patients.
+- Use search_mode="starts_with" for prompts like "starts with N" and search_mode="contains" for prompts like "contains lopez".
+- Split blood pressure values like 140/90 into systolic and diastolic observations.
+- Default unknown gender to "U", default unknown clinical_status to "active", and default unknown verification_status to "confirmed" when a handler supports those defaults.
+- Never hallucinate unsupported actions or external systems.
+"""
+
+_FALLBACK_DECISION_PROMPT = f"""\
+You are MedPilot's decision fallback layer.
+
+The first-pass decision either returned an unsupported intent or left the intent blank.
+Your job: map the user's message to exactly one supported intent and produce a corrected decision.
+
+Rules:
+- Choose intent from the supported list only: {_SUPPORTED_INTENTS}.
+- Never leave intent blank.
+- Set scope="global" for population-level queries (count, search all, metadata). Set scope="patient" for patient-specific actions.
+- Do NOT ask what system, portal, or facility the user means.
+- If a supported action is clearly intended but one critical field is missing, use mode="clarify" and populate missing_fields.
+- For destructive requests (delete patient, purge), choose the corresponding destructive intent directly.
+- For follow-up requests like "Show their vitals" or "Show their medications", set patient_query null and scope="patient".
+- Keep response_message brief and action-oriented.
+"""
+
+_CLARIFICATION_RESOLUTION_PROMPT = """\
+You are MedPilot's clarification resolution layer.
+
+The user previously answered a clarifying question. You have access to:
+- The structured pending clarification slot from session context (intent, already collected entities, remaining missing_fields)
+- The conversation history
+- The assistant's last clarifying question
+- The user's new answer
+
+Rules:
+- Preserve the existing intended action whenever the new message is filling missing details.
+- Merge the user's answer into the collected_entities from the slot — do NOT drop entities already known.
+- Use mode="action" when all missing_fields can now be satisfied from the combined entity set.
+- Use mode="clarify" only if important fields are still missing. Reduce missing_fields accordingly.
+- If the pending slot has a specific patient_uuid, carry it in scope="patient" and do not reset context.
+- Populate entities as the COMPLETE merged set — collected + newly answered.
+- Keep response_message brief and action-oriented.
+"""
 
 
 class LLMReasoningService:
@@ -33,48 +135,103 @@ class LLMReasoningService:
     def enabled(self) -> bool:
         return self.provider.enabled
 
-    def resolve_intent(
+    def generate_conversational_response(
         self,
         prompt: str,
-        deterministic: ParsedIntent,
         *,
-        has_file: bool = False,
         session_state: dict[str, Any] | None = None,
-    ) -> ParsedIntent:
-        if not (self.enabled and self.settings.medpilot_llm_enable_intent_reasoning):
-            return deterministic
+        has_file: bool = False,
+    ) -> ConversationalDecision:
+        if not self.enabled:
+            return ConversationalDecision(
+                mode="inform",
+                response_message=(
+                    "I need an LLM provider to be configured to process your request. "
+                    "Please set MEDPILOT_LLM_PROVIDER to 'openai' or 'ollama' and provide the required API keys in your .env file."
+                ),
+            )
 
-        system_prompt = (
-            "You are MedPilot's intent extraction layer for a clinical OpenMRS copilot. "
-            "Map the user's request into one supported intent and extract only grounded entities. "
-            "Supported intents include search_patient, switch_patient, get_metadata, patient_analysis, get_observations, create_observation, "
-            "update_observation, delete_observation, get_conditions, create_condition, update_condition, delete_condition, "
-            "get_allergies, create_allergy, update_allergy, delete_allergy, get_medications, get_medication_dispense, "
-            "create_medication, create_medication_dispense, update_medication, create_patient, patient_intake, create_encounter, ingest_pdf, sync_health_gorilla. "
-            "Do not invent entities that are not implied by the prompt. Use patient_intake when a new patient is being created with multiple related clinical items in one request. "
-            "Use the session context to resolve follow-up references like 'this patient', 'switch back', 'that chart', or omitted patient names. "
-            "For search_patient, extract only the patient identifier or name and strip conversational wrappers such as 'is there a patient called', 'find any related patient whose name is', or 'do we have'. "
-            "When the user asks for starts-with or contains matching, include a search_mode entity with values like starts_with, contains, or default."
-        )
         user_prompt = (
-            f"Prompt:\n{prompt}\n\n"
+            f"User message: {prompt}\n\n"
             f"Attachment present: {'yes' if has_file else 'no'}\n\n"
-            f"Session context:\n{self._render_session_context(session_state)}\n\n"
-            f"Deterministic candidate:\n{deterministic.model_dump_json(indent=2)}"
+            f"Session context:\n{self._render_session_context(session_state)}"
         )
         try:
-            structured = self.provider.generate_structured(
-                system_prompt=system_prompt,
+            return self.provider.generate_structured(
+                system_prompt=_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
-                schema=LLMIntentOutput,
+                schema=ConversationalDecision,
+            )
+        except LLMProviderError as exc:
+            return ConversationalDecision(
+                mode="inform",
+                response_message=f"I encountered an error processing your request: {exc}. Please try again.",
+            )
+
+    def run_fallback_decision(
+        self,
+        prompt: str,
+        initial_decision: ConversationalDecision,
+        *,
+        session_state: dict[str, Any] | None = None,
+        has_file: bool = False,
+    ) -> ConversationalDecision:
+        """Single-pass fallback: collapsed repair + operational resolver.
+
+        Only called when the first pass returned an unsupported or blank intent.
+        This replaces the previous two-pass repair → operational chain.
+        """
+        if not self.enabled:
+            return initial_decision
+
+        user_prompt = (
+            f"User message: {prompt}\n\n"
+            f"Attachment present: {'yes' if has_file else 'no'}\n\n"
+            f"Session context:\n{self._render_session_context(session_state)}\n\n"
+            f"First-pass decision (needs correction):\n{initial_decision.model_dump_json(indent=2)}"
+        )
+        try:
+            resolved = self.provider.generate_structured(
+                system_prompt=_FALLBACK_DECISION_PROMPT,
+                user_prompt=user_prompt,
+                schema=OperationalDecision,
             )
         except LLMProviderError:
-            return deterministic
+            return initial_decision
+        return ConversationalDecision.model_validate(resolved.model_dump())
 
-        llm_parsed = ParsedIntent.model_validate(structured.model_dump())
-        return self._merge_intents(deterministic, llm_parsed)
+    def resolve_clarification_answer(
+        self,
+        prompt: str,
+        initial_decision: ConversationalDecision,
+        *,
+        session_state: dict[str, Any] | None = None,
+    ) -> ConversationalDecision:
+        if not self.enabled:
+            return initial_decision
 
-    def render_clinical_summary(self, patient_display: str, brief: dict[str, Any], *, session_state: dict[str, Any] | None = None) -> str | None:
+        user_prompt = (
+            f"User message: {prompt}\n\n"
+            f"Session context:\n{self._render_session_context(session_state)}\n\n"
+            f"Current decision:\n{initial_decision.model_dump_json(indent=2)}"
+        )
+        try:
+            resolved = self.provider.generate_structured(
+                system_prompt=_CLARIFICATION_RESOLUTION_PROMPT,
+                user_prompt=user_prompt,
+                schema=OperationalDecision,
+            )
+        except LLMProviderError:
+            return initial_decision
+        return ConversationalDecision.model_validate(resolved.model_dump())
+
+    def render_clinical_summary(
+        self,
+        patient_display: str,
+        brief: dict[str, Any],
+        *,
+        session_state: dict[str, Any] | None = None,
+    ) -> str | None:
         if not (self.enabled and self.settings.medpilot_llm_enable_summary_reasoning):
             return None
 
@@ -107,79 +264,67 @@ class LLMReasoningService:
         return " ".join(part for part in parts if part)
 
     @staticmethod
+    def _render_slot_context(slot: PendingClarificationSlot) -> str:
+        """Serialize a structured clarification slot for LLM prompts."""
+        lines = [
+            f"PENDING CLARIFICATION SLOT:",
+            f"  intent: {slot.intent or 'unknown'}",
+            f"  question asked: \"{slot.question}\"",
+            f"  missing fields: {', '.join(slot.missing_fields) if slot.missing_fields else 'none'}",
+            f"  turn_count: {slot.turn_count}",
+        ]
+        if slot.collected_entities:
+            lines.append(f"  collected entities: {json.dumps(slot.collected_entities, ensure_ascii=True)}")
+        if slot.patient_uuid:
+            lines.append(f"  patient context: {slot.patient_display or 'Unknown'} (UUID: {slot.patient_uuid})")
+        lines.append("The user's current message is likely answering this question. Merge it deterministically.")
+        return "\n".join(lines)
+
+    @staticmethod
     def _render_session_context(session_state: dict[str, Any] | None) -> str:
         if not session_state:
-            return "No prior session context."
+            return "No prior session context. This is a new conversation."
 
         lines: list[str] = []
         if session_state.get("current_patient_display") or session_state.get("current_patient_uuid"):
             lines.append(
                 "Active patient: "
                 f"{session_state.get('current_patient_display') or 'Unknown'} "
-                f"({session_state.get('current_patient_uuid') or 'unknown uuid'})"
+                f"(UUID: {session_state.get('current_patient_uuid') or 'unknown'})"
             )
+        else:
+            lines.append("No active patient in this session.")
+
         if session_state.get("last_intent"):
-            lines.append(f"Last intent: {session_state['last_intent']}")
+            lines.append(f"Last action performed: {session_state['last_intent']}")
+
+        pending_clarification = session_state.get("pending_clarification")
+        if pending_clarification:
+            # pending_clarification is now a dict from PendingClarificationSlot.model_dump()
+            if isinstance(pending_clarification, dict) and pending_clarification.get("question"):
+                slot = PendingClarificationSlot.model_validate(pending_clarification)
+                lines.append(LLMReasoningService._render_slot_context(slot))
+            elif isinstance(pending_clarification, str):
+                # Backward compat: old sessions stored plain text
+                lines.append(f'PENDING CLARIFICATION: "{pending_clarification}"')
+                lines.append("The user's current message may be answering this question.")
+
+        if session_state.get("pending_workflow"):
+            lines.append("Structured pending workflow:")
+            lines.append(json.dumps(session_state["pending_workflow"], ensure_ascii=True, indent=2))
 
         recent_turns = session_state.get("recent_turns") or []
         if recent_turns:
-            lines.append("Recent turns:")
-            for turn in recent_turns[-6:]:
+            lines.append(f"\nConversation history ({len(recent_turns)} recent turns):")
+            for turn in recent_turns[-12:]:
                 role = turn.get("role", "unknown")
                 content = str(turn.get("content", "")).strip().replace("\n", " ")
-                if len(content) > 180:
-                    content = content[:177] + "..."
-                lines.append(f"- {role}: {content}")
+                intent = turn.get("intent")
+                if len(content) > 250:
+                    content = content[:247] + "..."
+                entry = f"  [{role.upper()}]: {content}"
+                if intent:
+                    entry += f"  [intent: {intent}]"
+                lines.append(entry)
 
-        return "\n".join(lines) if lines else "No prior session context."
-
-    @staticmethod
-    def _merge_intents(deterministic: ParsedIntent, llm_parsed: ParsedIntent) -> ParsedIntent:
-        if deterministic.intent == "create_patient" and llm_parsed.intent == "patient_intake" and not LLMReasoningService._has_clinical_payload(llm_parsed.entities):
-            llm_parsed = ParsedIntent(intent="create_patient", write=True, confidence=llm_parsed.confidence, entities=llm_parsed.entities)
-        if deterministic.intent == "patient_intake" and llm_parsed.intent == "create_patient" and LLMReasoningService._has_clinical_payload(deterministic.entities):
-            llm_parsed = ParsedIntent(intent="patient_intake", write=True, confidence=llm_parsed.confidence, entities=llm_parsed.entities)
-        if deterministic.intent == "search_patient" and llm_parsed.intent == "search_patient":
-            llm_parsed = ParsedIntent(
-                intent="search_patient",
-                write=False,
-                confidence=llm_parsed.confidence,
-                entities=LLMReasoningService._prefer_more_specific_search_query(llm_parsed.entities, deterministic.entities),
-            )
-        if llm_parsed.confidence < 0.55:
-            return deterministic
-        if deterministic.confidence < 0.6 and llm_parsed.confidence >= 0.6:
-            merged_entities = LLMReasoningService._merge_entity_maps(llm_parsed.entities, deterministic.entities)
-            return ParsedIntent(intent=llm_parsed.intent, write=llm_parsed.write, confidence=llm_parsed.confidence, entities=merged_entities)
-        chosen = llm_parsed if llm_parsed.confidence >= deterministic.confidence - 0.05 else deterministic
-        fallback = deterministic if chosen is llm_parsed else llm_parsed
-        merged_entities = LLMReasoningService._merge_entity_maps(chosen.entities, fallback.entities)
-        return ParsedIntent(intent=chosen.intent, write=chosen.write, confidence=max(chosen.confidence, fallback.confidence), entities=merged_entities)
-
-    @staticmethod
-    def _merge_entity_maps(primary: dict[str, Any], secondary: dict[str, Any]) -> dict[str, Any]:
-        merged = dict(primary)
-        for key, value in secondary.items():
-            if key not in merged or merged[key] in (None, "", [], {}):
-                merged[key] = value
-            elif isinstance(merged[key], dict) and isinstance(value, dict):
-                merged[key] = LLMReasoningService._merge_entity_maps(merged[key], value)
-        return merged
-
-    @staticmethod
-    def _has_clinical_payload(entities: dict[str, Any]) -> bool:
-        return any(entities.get(key) for key in ("conditions", "allergies", "observations", "medications", "dispenses"))
-
-    @staticmethod
-    def _prefer_more_specific_search_query(primary: dict[str, Any], secondary: dict[str, Any]) -> dict[str, Any]:
-        merged = LLMReasoningService._merge_entity_maps(primary, secondary)
-        primary_query = str(primary.get("patient_query") or "").strip()
-        secondary_query = str(secondary.get("patient_query") or "").strip()
-        if primary_query and secondary_query:
-            primary_tokens = len(primary_query.split())
-            secondary_tokens = len(secondary_query.split())
-            if secondary_query.lower() in primary_query.lower() and secondary_tokens < primary_tokens:
-                merged["patient_query"] = secondary_query
-            elif primary_query.lower() in secondary_query.lower() and primary_tokens < secondary_tokens:
-                merged["patient_query"] = primary_query
-        return merged
+        return "\n".join(lines)

@@ -20,7 +20,6 @@ from app.services.observations import ObservationService
 from app.services.pending_actions import PendingActionStore
 from app.services.patients import PatientService
 from app.services.population import PopulationService
-from app.services.prompt_parser import PromptParser
 from app.services.summaries import SummaryService
 
 
@@ -112,11 +111,6 @@ def get_chat_session_store() -> ChatSessionStore:
 
 
 @lru_cache(maxsize=1)
-def get_prompt_parser() -> PromptParser:
-    return PromptParser()
-
-
-@lru_cache(maxsize=1)
 def get_pending_action_store() -> PendingActionStore:
     return PendingActionStore()
 
@@ -139,7 +133,6 @@ def get_ingestion_service() -> IngestionService:
 @lru_cache(maxsize=1)
 def get_chat_agent_service() -> ChatAgentService:
     return ChatAgentService(
-        get_prompt_parser(),
         get_llm_reasoning_service(),
         get_chat_session_store(),
         get_pending_action_store(),
@@ -152,4 +145,5 @@ def get_chat_agent_service() -> ChatAgentService:
         get_medication_service(),
         get_encounter_service(),
         get_ingestion_service(),
+        get_population_service(),
     )

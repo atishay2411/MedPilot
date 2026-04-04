@@ -15,6 +15,19 @@ class PatientRegistration(BaseModel):
     country: str | None = None
 
 
+class PatientUpdateInput(BaseModel):
+    """Partial update to patient demographics. All fields optional except patient_uuid."""
+
+    patient_uuid: str
+    given_name: str | None = None
+    family_name: str | None = None
+    gender: Literal["M", "F", "O", "U"] | None = None
+    birthdate: str | None = None
+    address1: str | None = None
+    city_village: str | None = None
+    country: str | None = None
+
+
 class PatientSearchQuery(BaseModel):
     query: str
 

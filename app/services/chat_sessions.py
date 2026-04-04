@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from app.config import Settings
 from app.core.exceptions import ValidationError
-from app.models.common import ChatHistoryTurn, ChatSessionRecord
+from app.models.common import ChatHistoryTurn, ChatSessionRecord, PendingClarificationSlot, PendingWorkflowState
 
 
 class ChatSessionStore:
@@ -51,6 +51,29 @@ class ChatSessionStore:
 
     def set_last_intent(self, session: ChatSessionRecord, intent: str | None) -> ChatSessionRecord:
         session.last_intent = intent
+        return self.save(session)
+
+    def set_pending_clarification(
+        self,
+        session: ChatSessionRecord,
+        slot: PendingClarificationSlot | None,
+    ) -> ChatSessionRecord:
+        """Persist a structured clarification slot (or clear it when None)."""
+        session.pending_clarification = slot
+        return self.save(session)
+
+    def set_pending_workflow(self, session: ChatSessionRecord, workflow: PendingWorkflowState | None) -> ChatSessionRecord:
+        session.pending_workflow = workflow
+        return self.save(session)
+
+    def clear_stale_context(self, session: ChatSessionRecord) -> ChatSessionRecord:
+        """Clear pending clarification and pending workflow on a new independent query.
+
+        Call this when the detected scope is 'global' and there is no in-progress
+        clarification turn — prevents stale carry-over from earlier bad turns.
+        """
+        session.pending_clarification = None
+        session.pending_workflow = None
         return self.save(session)
 
     def _path(self, session_id: str) -> Path:

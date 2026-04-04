@@ -1,129 +1,130 @@
 {
   "id": "1f1b3415-6eea-4e06-a53a-3cdc32119770",
   "created_at": "2026-04-04T18:02:27.034719+00:00",
-  "updated_at": "2026-04-04T18:22:13.604523+00:00",
+  "updated_at": "2026-04-04T19:04:44.832310+00:00",
   "current_patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376",
   "current_patient_display": "647386E - Nesh Test",
-  "last_intent": "search_patient",
+  "last_intent": "inform",
+  "pending_clarification": null,
   "recent_turns": [
     {
       "role": "user",
-      "content": "Find patient Nesh test",
+      "content": "how many patients are present?",
       "intent": null,
-      "patient_uuid": null
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "assistant",
-      "content": "I found 1 patient candidate(s) for 'Nesh test'.",
-      "intent": "search_patient",
+      "content": "There is 1 patient present.",
+      "intent": "inform",
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "user",
-      "content": "Is there a patient called Nesh test?",
+      "content": "name",
       "intent": null,
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "assistant",
-      "content": "I found 0 patient candidate(s) for 'Is there a patient called Nesh test?'.",
-      "intent": "search_patient",
+      "content": "There is no attachment present.",
+      "intent": "inform",
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "user",
-      "content": "Is there a patient called Nesh test?",
+      "content": "Add patient sahil to openmrs",
       "intent": null,
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "assistant",
-      "content": "I found 1 patient candidate(s) for 'Nesh test'.",
-      "intent": "search_patient",
+      "content": "I received an unsupported intent 'add_patient'. Could you rephrase?",
+      "intent": "inform",
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "user",
-      "content": "find any related patient whose name is Nesh test",
+      "content": "Add patient sahil to openmrs",
       "intent": null,
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "assistant",
-      "content": "I found 0 patient candidate(s) for 'any related patient whose name is Nesh test'.",
-      "intent": "search_patient",
+      "content": "I received an unsupported intent 'add_patient'. Could you rephrase?",
+      "intent": "inform",
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "user",
-      "content": "is there a patient called Nesh?",
+      "content": "Analyze patient Maria Santos for any urgent issues",
       "intent": null,
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "assistant",
-      "content": "I found 2 patient candidate(s) for 'Nesh'.",
-      "intent": "search_patient",
+      "content": "No urgent issues found for patient Maria Santos.",
+      "intent": "inform",
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "user",
-      "content": "Find any patient whose name starts with N",
+      "content": "Add sahil who is a male, born on 4 apr 2000 in chicago",
       "intent": null,
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "assistant",
-      "content": "I found 2 patient candidate(s) for 'Nesh'.",
-      "intent": "search_patient",
+      "content": "{\"name\": \"Sahil\", \"gender\": \"male\", \"birthdate\": \"2000-04-04\", \"location\": \"Chicago\"}",
+      "intent": "inform",
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "user",
-      "content": "Find any patient whose name starts with N",
+      "content": "Find patient Maria Santos",
       "intent": null,
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "assistant",
-      "content": "I found 0 patient candidate(s) for 'N'.",
-      "intent": "search_patient",
+      "content": "No patient found with the name Maria Santos.",
+      "intent": "inform",
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "user",
-      "content": "Find any patient whose name starts with N",
+      "content": "Create patient: Sahil Rochwani who was born in India on 24 apr 2026 - he has minor cold",
       "intent": null,
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "assistant",
-      "content": "I found 4 patient candidate(s) for 'N' using prefix matching.",
-      "intent": "search_patient",
+      "content": "{\"name\": \"Sahil Rochwani\", \"gender\": \"male\", \"birthdate\": \"2026-04-24\", \"location\": \"India\", \"condition\": \"minor cold\"}",
+      "intent": "inform",
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "user",
-      "content": "Find any patient whose name starts with N and list them",
+      "content": "List all the patients",
       "intent": null,
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "assistant",
-      "content": "I found 4 patient candidate(s) for 'N' using prefix matching.",
-      "intent": "search_patient",
+      "content": "{\"name\": \"Sahil Rochwani\", \"gender\": \"male\", \"birthdate\": \"2026-04-24\", \"location\": \"India\", \"condition\": \"minor cold\"}",
+      "intent": "inform",
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "user",
-      "content": "Final all patients whose names start with N and list them",
+      "content": "list all the existing patients",
       "intent": null,
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     },
     {
       "role": "assistant",
-      "content": "I could not find any patients matching 'Final all patients whose names start with N and list them'.",
-      "intent": "search_patient",
+      "content": "{\"name\": \"Sahil Rochwani\", \"gender\": \"male\", \"birthdate\": \"2026-04-24\", \"location\": \"India\", \"condition\": \"minor cold\"}",
+      "intent": "inform",
       "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
     }
   ]
