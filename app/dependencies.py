@@ -1,0 +1,104 @@
+from functools import lru_cache
+
+from app.clients.health_gorilla import HealthGorillaClient
+from app.clients.openmrs import OpenMRSClient
+from app.config import get_settings
+from app.core.audit import AuditLogger
+from app.services.allergies import AllergyService
+from app.services.conditions import ConditionService
+from app.services.encounters import EncounterService
+from app.services.ingestion import IngestionService
+from app.services.intents import IntentService
+from app.services.lookups import LookupService
+from app.services.medications import MedicationService
+from app.services.observations import ObservationService
+from app.services.patients import PatientService
+from app.services.population import PopulationService
+from app.services.summaries import SummaryService
+
+
+@lru_cache(maxsize=1)
+def get_openmrs_client() -> OpenMRSClient:
+    return OpenMRSClient(get_settings())
+
+
+@lru_cache(maxsize=1)
+def get_health_gorilla_client() -> HealthGorillaClient:
+    return HealthGorillaClient(get_settings())
+
+
+@lru_cache(maxsize=1)
+def get_lookup_service() -> LookupService:
+    return LookupService(get_openmrs_client())
+
+
+@lru_cache(maxsize=1)
+def get_patient_service() -> PatientService:
+    return PatientService(get_openmrs_client(), get_settings())
+
+
+@lru_cache(maxsize=1)
+def get_encounter_service() -> EncounterService:
+    return EncounterService(get_openmrs_client(), get_lookup_service())
+
+
+@lru_cache(maxsize=1)
+def get_observation_service() -> ObservationService:
+    return ObservationService(get_openmrs_client())
+
+
+@lru_cache(maxsize=1)
+def get_condition_service() -> ConditionService:
+    return ConditionService(get_openmrs_client(), get_lookup_service())
+
+
+@lru_cache(maxsize=1)
+def get_allergy_service() -> AllergyService:
+    return AllergyService(get_openmrs_client(), get_lookup_service())
+
+
+@lru_cache(maxsize=1)
+def get_medication_service() -> MedicationService:
+    return MedicationService(get_openmrs_client(), get_lookup_service())
+
+
+@lru_cache(maxsize=1)
+def get_summary_service() -> SummaryService:
+    return SummaryService(
+        get_patient_service(),
+        get_observation_service(),
+        get_condition_service(),
+        get_allergy_service(),
+        get_medication_service(),
+        get_encounter_service(),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_population_service() -> PopulationService:
+    return PopulationService(get_openmrs_client())
+
+
+@lru_cache(maxsize=1)
+def get_intent_service() -> IntentService:
+    return IntentService(get_patient_service())
+
+
+@lru_cache(maxsize=1)
+def get_audit_logger() -> AuditLogger:
+    return AuditLogger(get_settings().audit_log_path)
+
+
+@lru_cache(maxsize=1)
+def get_ingestion_service() -> IngestionService:
+    return IngestionService(
+        get_settings(),
+        get_openmrs_client(),
+        get_health_gorilla_client(),
+        get_patient_service(),
+        get_encounter_service(),
+        get_observation_service(),
+        get_condition_service(),
+        get_allergy_service(),
+        get_medication_service(),
+    )
