@@ -1,0 +1,1 @@
+"""MedPilot application package."""

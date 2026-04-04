@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MedPilot</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="hero">
+        <p class="eyebrow">OpenMRS Clinical Copilot</p>
+        <h1>MedPilot</h1>
+        <p class="lede">Production-grade workflows for patient search, preview-gated writes, PDF ingestion, and Health Gorilla sync.</p>
+        <div class="hero-card">
+          <p>Safety rails built in</p>
+          <ul>
+            <li>RBAC-aligned access model</li>
+            <li>Explicit write previews</li>
+            <li>DELETE hard confirmation</li>
+            <li>Append-only audit logging</li>
+          </ul>
+        </div>
+      </aside>
+      <main class="workspace">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Patient Search</h2>
+          </div>
+          <form id="search-form" class="grid-form">
+            <input id="search-query" type="text" placeholder="Find patient by name or ID" />
+            <button type="submit">Search</button>
+          </form>
+          <div id="search-results" class="results"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Create Patient</h2>
+          </div>
+          <form id="register-form" class="grid-form">
+            <input name="given_name" placeholder="First name" required />
+            <input name="family_name" placeholder="Last name" required />
+            <input name="birthdate" type="date" required />
+            <select name="gender" required>
+              <option value="F">Female</option>
+              <option value="M">Male</option>
+              <option value="O">Other</option>
+              <option value="U">Unknown</option>
+            </select>
+            <input name="address1" placeholder="Address" />
+            <input name="city_village" placeholder="City" />
+            <input name="country" placeholder="Country" />
+            <button type="submit">Preview Registration</button>
+          </form>
+          <pre id="registration-preview" class="preview-box"></pre>
+          <button id="confirm-registration" class="secondary" disabled>Confirm Patient Creation</button>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>PDF Ingestion</h2>
+          </div>
+          <form id="pdf-form" class="grid-form">
+            <input id="pdf-patient-uuid" type="text" placeholder="Patient UUID" required />
+            <input id="pdf-file" type="file" accept=".pdf" required />
+            <button type="button" id="preview-pdf">Preview PDF</button>
+            <button type="submit">Execute Ingestion</button>
+          </form>
+          <pre id="pdf-preview" class="preview-box"></pre>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Health Gorilla Preview</h2>
+          </div>
+          <form id="hg-form" class="grid-form">
+            <input name="given_name" placeholder="First name" required />
+            <input name="family_name" placeholder="Last name" required />
+            <input name="birthdate" type="date" required />
+            <button type="submit">Preview Import</button>
+          </form>
+          <pre id="hg-preview" class="preview-box"></pre>
+        </section>
+
+        <section class="panel warning-panel">
+          <div class="panel-head">
+            <h2>Destructive Confirmation</h2>
+          </div>
+          <form id="delete-form" class="grid-form">
+            <input id="delete-condition-uuid" type="text" placeholder="Condition UUID" required />
+            <input id="delete-patient-uuid" type="text" placeholder="Patient UUID (for audit)" required />
+            <input id="delete-confirm" type="text" placeholder="Type DELETE" required />
+            <button type="submit" class="danger">Delete Condition</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Event Feed</h2>
+          </div>
+          <div id="event-log" class="event-log"></div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
