@@ -1,137 +1,41 @@
 {
   "id": "5db19581-7162-4baf-b9cc-ddebaf34f9ea",
   "created_at": "2026-04-04T19:08:34.994299+00:00",
-  "updated_at": "2026-04-04T22:04:05.235040+00:00",
+  "updated_at": "2026-04-04T22:11:49.977417+00:00",
   "current_patient_uuid": null,
   "current_patient_display": null,
-  "last_intent": "search_patient",
+  "last_intent": "create_patient",
   "pending_clarification": {
-    "question": "Can you please provide more context or clarify what you mean by 'Wrong'? Which patient were you referring to?",
-    "intent": "search_patient",
-    "collected_entities": {},
-    "missing_fields": [],
+    "question": "I still need: family_name. Could you provide those?",
+    "intent": "create_patient",
+    "collected_entities": {
+      "given_name": "Atishay",
+      "family_name": null,
+      "birthdate": "2000-11-24"
+    },
+    "missing_fields": [
+      "family_name"
+    ],
     "patient_uuid": null,
     "patient_display": null,
-    "turn_count": 1
+    "turn_count": 7
   },
   "pending_workflow": {
-    "intent": "search_patient",
-    "original_prompt": "Wrong",
-    "collected_entities": {},
-    "missing_fields": [],
-    "clarifying_question": "Can you please provide more context or clarify what you mean by 'Wrong'? Which patient were you referring to?",
+    "intent": "create_patient",
+    "original_prompt": "i did",
+    "collected_entities": {
+      "given_name": "Atishay",
+      "family_name": null,
+      "birthdate": "2000-11-24"
+    },
+    "missing_fields": [
+      "family_name"
+    ],
+    "clarifying_question": "I still need: family_name. Could you provide those?",
     "patient_uuid": null,
     "patient_display": null
   },
   "recent_turns": [
-    {
-      "role": "user",
-      "content": "How many patients are present in my OpenMRS?",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "There are 58 patients available in the connected OpenMRS search scope.",
-      "intent": "count_patients",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Add a patient - Sahil Singh",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I have the name **- Sahil Singh**. What is their date of birth?",
-      "intent": "create_patient",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "24 Apr 2000",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I ran into an unexpected application error while trying to complete that request.",
-      "intent": "create_patient",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Add a patient Sahil Singh who was born on 24 apr 2000",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I ran into an unexpected application error while trying to complete that request.",
-      "intent": "create_patient",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Summarize this patient",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I ran into an issue: No patient matched 'this patient'.",
-      "intent": "patient_analysis",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Show their medications",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I ran into an issue: A patient name, identifier, or UUID is required for this action.",
-      "intent": "get_medications",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Select a patient",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "There are **58** patients registered in OpenMRS: Betty Williams, Susan Lopez, Barbara Miller, Grace Garcia, Mark Smith, James Martinez, Michael Turner, Kevin Brown, Joshua Johnson, Emily Hill, and 48 more.",
-      "intent": "search_patient",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Select Mark",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I ran into an issue: A patient name, identifier, or UUID is required for this action.",
-      "intent": "switch_patient",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Patient name: Joshua Johnson",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "There are **58** patients registered in OpenMRS: Betty Williams, Susan Lopez, Barbara Miller, Grace Garcia, Mark Smith, James Martinez, Michael Turner, Kevin Brown, Joshua Johnson, Emily Hill, and 48 more.",
-      "intent": "search_patient",
-      "patient_uuid": null
-    },
     {
       "role": "user",
       "content": "Wrong",
@@ -142,6 +46,114 @@
       "role": "assistant",
       "content": "Can you please provide more context or clarify what you mean by 'Wrong'? Which patient were you referring to?",
       "intent": "search_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Show their allergies",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: A patient name, identifier, or UUID is required for this action.",
+      "intent": "get_allergies",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Select patient Nesh test",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I encountered an error processing your request: Ollama request failed: timed out. Please try again.",
+      "intent": "inform",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Add a patient named Atishay",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I have the name **Atishay None**. What is their date of birth?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "24 nov 2000",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I still need: family_name. Could you provide those?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Jain",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I still need: family_name. Could you provide those?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Atishay Jain",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I still need: family_name. Could you provide those?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "family name is Jain",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I still need: family_name. Could you provide those?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "yes",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I still need: family_name. Could you provide those?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "i did",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I still need: family_name. Could you provide those?",
+      "intent": "create_patient",
       "patient_uuid": null
     }
   ]
