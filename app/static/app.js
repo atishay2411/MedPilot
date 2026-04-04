@@ -1,109 +1,237 @@
-const logEl = document.getElementById("event-log");
-const registrationPreviewEl = document.getElementById("registration-preview");
-const confirmRegistrationBtn = document.getElementById("confirm-registration");
-let pendingRegistration = null;
+const transcriptEl = document.getElementById("transcript");
+const promptEl = document.getElementById("prompt");
+const patientUuidEl = document.getElementById("patient-uuid");
+const fileInputEl = document.getElementById("file-input");
+const patientContextEl = document.getElementById("patient-context");
+const llmBadgeEl = document.getElementById("llm-badge");
 
-function logEvent(title, body) {
-  const article = document.createElement("article");
-  article.innerHTML = `<strong>${title}</strong><div>${body}</div>`;
-  logEl.prepend(article);
-}
+const state = {
+  currentPatientUuid: "",
+  currentPatientDisplay: "",
+};
 
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options,
-  });
-  const data = await response.json();
-  if (!response.ok || data.ok === false) {
-    throw new Error(typeof data.error === "string" ? data.error : JSON.stringify(data.error));
+function renderPatientContext() {
+  if (!state.currentPatientUuid) {
+    patientContextEl.innerHTML = "<p>No patient selected yet.</p>";
+    return;
   }
-  return data.data;
+  patientContextEl.innerHTML = `
+    <strong>${escapeHtml(state.currentPatientDisplay || "Resolved patient")}</strong>
+    <p class="muted">UUID: ${escapeHtml(state.currentPatientUuid)}</p>
+  `;
+  patientUuidEl.value = state.currentPatientUuid;
 }
 
-document.getElementById("search-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const query = document.getElementById("search-query").value;
-  const results = await api("/api/patients/search", { method: "POST", body: JSON.stringify({ query }) });
-  document.getElementById("search-results").textContent = JSON.stringify(results, null, 2);
-  logEvent("Patient search", `Returned ${results.length} candidate records.`);
-});
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
 
-document.getElementById("register-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = new FormData(event.currentTarget);
-  const payload = Object.fromEntries(form.entries());
-  pendingRegistration = await api("/api/patients/preview", { method: "POST", body: JSON.stringify(payload) });
-  registrationPreviewEl.textContent = JSON.stringify(pendingRegistration, null, 2);
-  confirmRegistrationBtn.disabled = false;
-  logEvent("Registration preview", "Write payload prepared and waiting for confirmation.");
-});
+function stringify(value) {
+  return JSON.stringify(value, null, 2);
+}
 
-confirmRegistrationBtn.addEventListener("click", async () => {
-  if (!pendingRegistration) return;
-  const result = await api("/api/writes/execute", {
-    method: "POST",
-    body: JSON.stringify({
-      ...pendingRegistration,
-      confirmed: true,
-      prompt: "UI registration confirmation",
-    }),
-  });
-  logEvent("Patient created", JSON.stringify(result, null, 2));
-  confirmRegistrationBtn.disabled = true;
-  pendingRegistration = null;
-});
+function appendMessage(role, content) {
+  const card = document.createElement("article");
+  card.className = `message ${role}`;
+  card.innerHTML = content;
+  transcriptEl.appendChild(card);
+  transcriptEl.scrollTop = transcriptEl.scrollHeight;
+}
 
-document.getElementById("preview-pdf").addEventListener("click", async () => {
-  const fileInput = document.getElementById("pdf-file");
+function renderWorkflow(workflow = []) {
+  if (!workflow.length) return "";
+  return `
+    <ul class="workflow">
+      ${workflow.map((step) => `<li><strong>${escapeHtml(step.title)}</strong>: ${escapeHtml(step.detail)} <span class="muted">(${escapeHtml(step.status)})</span></li>`).join("")}
+    </ul>
+  `;
+}
+
+function renderEvidence(evidence = []) {
+  if (!evidence.length) return "";
+  return `
+    <details>
+      <summary>Evidence</summary>
+      <ul class="evidence-list">
+        ${evidence
+          .map(
+            (item) =>
+              `<li><strong>${escapeHtml(item.label)}</strong> [${escapeHtml(item.resource_type)}${item.resource_uuid ? ` ${escapeHtml(item.resource_uuid)}` : ""}] ${escapeHtml(item.note)}</li>`,
+          )
+          .join("")}
+      </ul>
+    </details>
+  `;
+}
+
+function renderData(data) {
+  if (data === undefined || data === null) return "";
+  return `
+    <details>
+      <summary>Structured data</summary>
+      <pre class="json-block">${escapeHtml(stringify(data))}</pre>
+    </details>
+  `;
+}
+
+function renderPendingAction(pendingAction) {
+  if (!pendingAction) return "";
+  const destructive = pendingAction.destructive ? "destructive" : "";
+  const confirmInput = pendingAction.destructive
+    ? `<input type="text" placeholder="Type DELETE" data-confirm-text="${escapeHtml(pendingAction.id)}" />`
+    : "";
+  return `
+    <div class="pending-card ${destructive}">
+      <strong>${escapeHtml(pendingAction.action)}</strong>
+      <p class="muted">${escapeHtml(pendingAction.endpoint)}</p>
+      <pre class="json-block">${escapeHtml(stringify(pendingAction.payload || pendingAction.metadata || {}))}</pre>
+      <div class="pending-actions">
+        ${confirmInput}
+        <button class="${pendingAction.destructive ? "danger" : "secondary"}" data-confirm-action="${escapeHtml(pendingAction.id)}" data-destructive="${String(pendingAction.destructive)}">
+          ${pendingAction.destructive ? "Confirm Delete" : "Confirm Action"}
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderAssistantResponse(payload) {
+  const patientContext = payload.patient_context;
+  if (patientContext?.uuid) {
+    state.currentPatientUuid = patientContext.uuid;
+    state.currentPatientDisplay = patientContext.display || patientContext.uuid;
+    renderPatientContext();
+  }
+
+  appendMessage(
+    "assistant",
+    `
+      <div class="message-head">
+        <strong>MedPilot</strong>
+        <span>${escapeHtml(payload.intent)}</span>
+      </div>
+      <div>${escapeHtml(payload.message)}</div>
+      ${payload.summary ? `<div class="message-summary">${escapeHtml(payload.summary)}</div>` : ""}
+      ${renderWorkflow(payload.workflow)}
+      ${renderEvidence(payload.evidence)}
+      ${renderData(payload.data)}
+      ${renderPendingAction(payload.pending_action)}
+    `,
+  );
+}
+
+async function sendChat(prompt, file = null) {
   const formData = new FormData();
-  formData.append("file", fileInput.files[0]);
-  const response = await fetch("/api/ingestion/pdf/preview", { method: "POST", body: formData });
-  const data = await response.json();
-  document.getElementById("pdf-preview").textContent = JSON.stringify(data.data, null, 2);
-  logEvent("PDF preview", "PDF parsed successfully.");
-});
+  formData.append("prompt", prompt);
+  if (patientUuidEl.value.trim()) {
+    formData.append("patient_uuid", patientUuidEl.value.trim());
+  }
+  if (file) {
+    formData.append("file", file);
+  }
 
-document.getElementById("pdf-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
+  const response = await fetch("/api/chat", { method: "POST", body: formData });
+  const payload = await response.json();
+  if (!response.ok || payload.ok === false) {
+    throw new Error(typeof payload.error === "string" ? payload.error : stringify(payload.error));
+  }
+  return payload.data;
+}
+
+async function confirmAction(actionId, destructiveConfirmText = "") {
   const formData = new FormData();
-  formData.append("patient_uuid", document.getElementById("pdf-patient-uuid").value);
-  formData.append("confirmed", "true");
-  formData.append("file", document.getElementById("pdf-file").files[0]);
-  const response = await fetch("/api/ingestion/pdf/execute", { method: "POST", body: formData });
-  const data = await response.json();
-  document.getElementById("pdf-preview").textContent = JSON.stringify(data.data, null, 2);
-  logEvent("PDF ingestion executed", `Processed ${data.data.length} entities.`);
+  formData.append("action_id", actionId);
+  if (destructiveConfirmText) {
+    formData.append("destructive_confirm_text", destructiveConfirmText);
+  }
+  const response = await fetch("/api/chat/confirm", { method: "POST", body: formData });
+  const payload = await response.json();
+  if (!response.ok || payload.ok === false) {
+    throw new Error(typeof payload.error === "string" ? payload.error : stringify(payload.error));
+  }
+  return payload.data;
+}
+
+async function refreshLLMStatus() {
+  try {
+    const response = await fetch("/api/llm/status");
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) return;
+    const status = payload.data;
+    if (!status.enabled || status.provider === "none") {
+      llmBadgeEl.textContent = "Deterministic reasoning active";
+      return;
+    }
+    llmBadgeEl.textContent = `${status.provider}: ${status.model || "configured"}`;
+  } catch (_error) {
+    llmBadgeEl.textContent = "LLM status unavailable";
+  }
+}
+
+document.getElementById("chat-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const prompt = promptEl.value.trim();
+  if (!prompt) return;
+
+  appendMessage(
+    "user",
+    `
+      <div class="message-head">
+        <strong>Clinician</strong>
+      </div>
+      <div>${escapeHtml(prompt)}</div>
+    `,
+  );
+
+  try {
+    const payload = await sendChat(prompt, fileInputEl.files[0] || null);
+    renderAssistantResponse(payload);
+    promptEl.value = "";
+    fileInputEl.value = "";
+  } catch (error) {
+    appendMessage("assistant", `<div class="message-head"><strong>MedPilot</strong></div><div>${escapeHtml(error.message)}</div>`);
+  }
 });
 
-document.getElementById("hg-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = new FormData(event.currentTarget);
-  const payload = Object.fromEntries(form.entries());
-  const preview = await api("/api/health-gorilla/preview", { method: "POST", body: JSON.stringify(payload) });
-  document.getElementById("hg-preview").textContent = JSON.stringify(preview, null, 2);
-  logEvent("Health Gorilla preview", `Prepared ${preview.conditions.length} conditions for potential import.`);
+transcriptEl.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-confirm-action]");
+  if (!button) return;
+  const actionId = button.dataset.confirmAction;
+  const destructive = button.dataset.destructive === "true";
+  const container = button.closest(".pending-card");
+  const input = container?.querySelector(`[data-confirm-text="${actionId}"]`);
+  const destructiveText = destructive ? input?.value?.trim() || "" : "";
+
+  try {
+    const payload = await confirmAction(actionId, destructiveText);
+    renderAssistantResponse(payload);
+    button.disabled = true;
+  } catch (error) {
+    appendMessage("assistant", `<div class="message-head"><strong>MedPilot</strong></div><div>${escapeHtml(error.message)}</div>`);
+  }
 });
 
-document.getElementById("delete-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const conditionUuid = document.getElementById("delete-condition-uuid").value;
-  const patientUuid = document.getElementById("delete-patient-uuid").value;
-  const confirmText = document.getElementById("delete-confirm").value;
-  const result = await api("/api/writes/execute", {
-    method: "POST",
-    body: JSON.stringify({
-      intent: "delete_condition",
-      action: "Delete Condition",
-      permission: "delete:condition",
-      endpoint: "DELETE /ws/fhir2/R4/Condition/{uuid}",
-      payload: { condition_uuid: conditionUuid },
-      confirmed: true,
-      destructive: true,
-      destructive_confirm_text: confirmText,
-      patient_uuid: patientUuid,
-      prompt: "UI destructive confirmation",
-    }),
+document.querySelectorAll(".chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    promptEl.value = chip.dataset.prompt || "";
+    promptEl.focus();
   });
-  logEvent("Condition deleted", JSON.stringify(result, null, 2));
 });
+
+appendMessage(
+  "assistant",
+  `
+    <div class="message-head">
+      <strong>MedPilot</strong>
+      <span>ready</span>
+    </div>
+    <div>Ask for patient search, chart summarization, patient analysis, condition updates, allergy changes, medication stop orders, PDF ingestion, or Health Gorilla sync. I will resolve intent, gather context, and either answer directly or prepare a confirmation-gated workflow.</div>
+  `,
+);
+
+renderPatientContext();
+refreshLLMStatus();

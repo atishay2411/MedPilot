@@ -27,6 +27,18 @@ class Settings(BaseSettings):
     health_gorilla_token: str | None = None
     health_gorilla_max_conditions: int = 20
 
+    medpilot_llm_provider: str = "none"
+    medpilot_llm_model: str | None = None
+    medpilot_llm_timeout_seconds: float = 30.0
+    medpilot_llm_reasoning_effort: str = "medium"
+    medpilot_llm_max_output_tokens: int = 2000
+    medpilot_llm_enable_intent_reasoning: bool = True
+    medpilot_llm_enable_summary_reasoning: bool = True
+
+    openai_api_key: str | None = None
+    openai_base_url: str = "https://api.openai.com/v1"
+    ollama_base_url: str = "http://localhost:11434/api"
+
     request_timeout_seconds: float = 10.0
     max_retries: int = 3
     audit_log_path: Path = Field(default=Path("data/audit/audit.log"))

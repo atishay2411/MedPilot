@@ -4,16 +4,22 @@ from app.clients.health_gorilla import HealthGorillaClient
 from app.clients.openmrs import OpenMRSClient
 from app.config import get_settings
 from app.core.audit import AuditLogger
+from app.llm.factory import build_llm_provider
+from app.llm.base import LLMProvider
 from app.services.allergies import AllergyService
+from app.services.chat_agent import ChatAgentService
 from app.services.conditions import ConditionService
 from app.services.encounters import EncounterService
 from app.services.ingestion import IngestionService
 from app.services.intents import IntentService
 from app.services.lookups import LookupService
 from app.services.medications import MedicationService
+from app.services.llm_reasoning import LLMReasoningService
 from app.services.observations import ObservationService
+from app.services.pending_actions import PendingActionStore
 from app.services.patients import PatientService
 from app.services.population import PopulationService
+from app.services.prompt_parser import PromptParser
 from app.services.summaries import SummaryService
 
 
@@ -90,6 +96,26 @@ def get_audit_logger() -> AuditLogger:
 
 
 @lru_cache(maxsize=1)
+def get_llm_provider() -> LLMProvider:
+    return build_llm_provider(get_settings())
+
+
+@lru_cache(maxsize=1)
+def get_llm_reasoning_service() -> LLMReasoningService:
+    return LLMReasoningService(get_llm_provider(), get_settings())
+
+
+@lru_cache(maxsize=1)
+def get_prompt_parser() -> PromptParser:
+    return PromptParser()
+
+
+@lru_cache(maxsize=1)
+def get_pending_action_store() -> PendingActionStore:
+    return PendingActionStore()
+
+
+@lru_cache(maxsize=1)
 def get_ingestion_service() -> IngestionService:
     return IngestionService(
         get_settings(),
@@ -101,4 +127,22 @@ def get_ingestion_service() -> IngestionService:
         get_condition_service(),
         get_allergy_service(),
         get_medication_service(),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_chat_agent_service() -> ChatAgentService:
+    return ChatAgentService(
+        get_prompt_parser(),
+        get_llm_reasoning_service(),
+        get_pending_action_store(),
+        get_audit_logger(),
+        get_patient_service(),
+        get_summary_service(),
+        get_observation_service(),
+        get_condition_service(),
+        get_allergy_service(),
+        get_medication_service(),
+        get_encounter_service(),
+        get_ingestion_service(),
     )

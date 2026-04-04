@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from app.clients.openmrs import OpenMRSClient
 from app.services.lookups import LookupService
 
@@ -42,3 +44,13 @@ class AllergyService:
 
     def delete(self, allergy_uuid: str) -> dict:
         return self.client.delete(f"/ws/fhir2/R4/AllergyIntolerance/{allergy_uuid}")
+
+    def find_by_allergen(self, patient_uuid: str, allergen_name: str) -> dict[str, Any] | None:
+        entries = self.list_for_patient(patient_uuid).get("entry", [])
+        normalized = allergen_name.lower()
+        for entry in entries:
+            resource = entry.get("resource", entry)
+            display = ((resource.get("code") or {}).get("coding") or [{}])[0].get("display") or (resource.get("code") or {}).get("text", "")
+            if display and normalized in display.lower():
+                return resource
+        return None

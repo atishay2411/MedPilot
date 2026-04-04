@@ -124,3 +124,10 @@ class WriteExecutionRequest(BaseModel):
     destructive: bool = False
     patient_uuid: str | None = None
     prompt: str | None = None
+
+
+class ParsedIntent(BaseModel):
+    intent: str
+    write: bool
+    confidence: float
+    entities: dict[str, Any] = Field(default_factory=dict)

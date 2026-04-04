@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
 from app.clients.openmrs import OpenMRSClient
+from app.core.exceptions import ValidationError
 from app.services.lookups import LookupService
 
 
@@ -43,3 +46,19 @@ class ConditionService:
                 "descriptions": [{"description": "Imported from Health Gorilla", "locale": "en"}],
             },
         )
+
+    def find_by_name(self, patient_uuid: str, condition_name: str) -> dict[str, Any] | None:
+        entries = self.list_for_patient(patient_uuid).get("entry", [])
+        normalized = condition_name.lower()
+        for entry in entries:
+            resource = entry.get("resource", entry)
+            display = ((resource.get("code") or {}).get("coding") or [{}])[0].get("display") or (resource.get("code") or {}).get("text", "")
+            if display and normalized in display.lower():
+                return resource
+        return None
+
+    def resolve_or_create_concept_uuid(self, condition_name: str) -> str:
+        try:
+            return self.lookups.resolve_uuid("concept", condition_name)
+        except ValidationError:
+            return self.create_concept(condition_name)["uuid"]

@@ -16,3 +16,7 @@ class ConfirmationError(MedPilotError):
 
 class ExternalServiceError(MedPilotError):
     """Raised when an upstream system fails."""
+
+
+class LLMProviderError(MedPilotError):
+    """Raised when a configured LLM provider fails."""

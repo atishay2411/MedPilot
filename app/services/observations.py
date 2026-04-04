@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from app.clients.openmrs import OpenMRSClient
 from app.models.domain import ObservationInput, ObservationUpdateInput
 
@@ -45,3 +47,28 @@ class ObservationService:
 
     def delete(self, observation_uuid: str) -> dict:
         return self.client.delete(f"/ws/fhir2/R4/Observation/{observation_uuid}")
+
+    def find_latest_by_display(self, patient_uuid: str, display: str) -> dict[str, Any] | None:
+        entries = self.list_for_patient(patient_uuid).get("entry", [])
+        matches = []
+        for entry in entries:
+            resource = entry.get("resource", entry)
+            resource_display = ((resource.get("code") or {}).get("coding") or [{}])[0].get("display") or (resource.get("code") or {}).get("text", "")
+            if resource_display.lower() == display.lower():
+                matches.append(resource)
+        if not matches:
+            return None
+        matches.sort(key=lambda item: item.get("effectiveDateTime", ""), reverse=True)
+        return matches[0]
+
+    @staticmethod
+    def extract_observation_snapshot(resource: dict[str, Any]) -> dict[str, Any]:
+        code = (resource.get("code") or {}).get("coding", [{}])[0]
+        value = resource.get("valueQuantity", {})
+        return {
+            "uuid": resource.get("id"),
+            "display": code.get("display") or (resource.get("code") or {}).get("text"),
+            "value": value.get("value"),
+            "unit": value.get("unit"),
+            "effectiveDateTime": resource.get("effectiveDateTime"),
+        }
