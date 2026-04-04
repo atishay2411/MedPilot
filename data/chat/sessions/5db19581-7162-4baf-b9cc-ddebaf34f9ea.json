@@ -1,131 +1,147 @@
 {
   "id": "5db19581-7162-4baf-b9cc-ddebaf34f9ea",
   "created_at": "2026-04-04T19:08:34.994299+00:00",
-  "updated_at": "2026-04-04T21:28:08.829704+00:00",
+  "updated_at": "2026-04-04T22:04:05.235040+00:00",
   "current_patient_uuid": null,
   "current_patient_display": null,
-  "last_intent": "create_patient",
-  "pending_clarification": null,
-  "pending_workflow": null,
+  "last_intent": "search_patient",
+  "pending_clarification": {
+    "question": "Can you please provide more context or clarify what you mean by 'Wrong'? Which patient were you referring to?",
+    "intent": "search_patient",
+    "collected_entities": {},
+    "missing_fields": [],
+    "patient_uuid": null,
+    "patient_display": null,
+    "turn_count": 1
+  },
+  "pending_workflow": {
+    "intent": "search_patient",
+    "original_prompt": "Wrong",
+    "collected_entities": {},
+    "missing_fields": [],
+    "clarifying_question": "Can you please provide more context or clarify what you mean by 'Wrong'? Which patient were you referring to?",
+    "patient_uuid": null,
+    "patient_display": null
+  },
   "recent_turns": [
     {
       "role": "user",
-      "content": "Find patient Nesh",
+      "content": "How many patients are present in my OpenMRS?",
       "intent": null,
       "patient_uuid": null
     },
     {
       "role": "assistant",
-      "content": "What is the context or system where Nesh is a patient in? Or what information do you need to find her record?",
-      "intent": "clarify",
+      "content": "There are 58 patients available in the connected OpenMRS search scope.",
+      "intent": "count_patients",
       "patient_uuid": null
     },
     {
       "role": "user",
-      "content": "delete all the patients",
+      "content": "Add a patient - Sahil Singh",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I have the name **- Sahil Singh**. What is their date of birth?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "24 Apr 2000",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an unexpected application error while trying to complete that request.",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Add a patient Sahil Singh who was born on 24 apr 2000",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an unexpected application error while trying to complete that request.",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Summarize this patient",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: No patient matched 'this patient'.",
+      "intent": "patient_analysis",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Show their medications",
       "intent": null,
       "patient_uuid": null
     },
     {
       "role": "assistant",
       "content": "I ran into an issue: A patient name, identifier, or UUID is required for this action.",
-      "intent": "delete_patient",
+      "intent": "get_medications",
       "patient_uuid": null
     },
     {
       "role": "user",
-      "content": "How many patients are present in total?",
+      "content": "Select a patient",
       "intent": null,
       "patient_uuid": null
     },
     {
       "role": "assistant",
-      "content": "There are no patients present in this session.",
-      "intent": "inform",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Add patient Nesh Rochwani",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
-      "intent": "create_patient",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Add patient nesh rochwani born on 24 april 2000 in Chicago",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
-      "intent": "create_patient",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Find patient Maria Santos",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "No patients found matching 'Find patient Maria Santos'.",
+      "content": "There are **58** patients registered in OpenMRS: Betty Williams, Susan Lopez, Barbara Miller, Grace Garcia, Mark Smith, James Martinez, Michael Turner, Kevin Brown, Joshua Johnson, Emily Hill, and 48 more.",
       "intent": "search_patient",
       "patient_uuid": null
     },
     {
       "role": "user",
-      "content": "What can you do?",
+      "content": "Select Mark",
       "intent": null,
       "patient_uuid": null
     },
     {
       "role": "assistant",
-      "content": "There are no patients present in this session.",
-      "intent": "inform",
+      "content": "I ran into an issue: A patient name, identifier, or UUID is required for this action.",
+      "intent": "switch_patient",
       "patient_uuid": null
     },
     {
       "role": "user",
-      "content": "Add a patient named Nesh Rochwani",
+      "content": "Patient name: Joshua Johnson",
       "intent": null,
       "patient_uuid": null
     },
     {
       "role": "assistant",
-      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
-      "intent": "create_patient",
+      "content": "There are **58** patients registered in OpenMRS: Betty Williams, Susan Lopez, Barbara Miller, Grace Garcia, Mark Smith, James Martinez, Michael Turner, Kevin Brown, Joshua Johnson, Emily Hill, and 48 more.",
+      "intent": "search_patient",
       "patient_uuid": null
     },
     {
       "role": "user",
-      "content": "Full name is Nesh Rochwani and dob is 24 April 2000",
+      "content": "Wrong",
       "intent": null,
       "patient_uuid": null
     },
     {
       "role": "assistant",
-      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
-      "intent": "create_patient",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Full name: Nesh Rochwani, born on 24 april 2000",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
-      "intent": "create_patient",
+      "content": "Can you please provide more context or clarify what you mean by 'Wrong'? Which patient were you referring to?",
+      "intent": "search_patient",
       "patient_uuid": null
     }
   ]

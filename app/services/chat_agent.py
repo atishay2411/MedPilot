@@ -24,6 +24,7 @@ from app.services.chat_sessions import ChatSessionStore
 from app.services.conditions import ConditionService
 from app.services.encounters import EncounterService
 from app.services.ingestion import IngestionService
+from app.services.deterministic_classifier import sanitize_response_message, try_deterministic_classify
 from app.services.llm_reasoning import ConversationalDecision, LLMReasoningService
 from app.services.medications import MedicationService
 from app.services.observations import ObservationService
@@ -83,32 +84,62 @@ class ChatAgentService:
         )
 
         effective_patient_uuid = patient_uuid or session.current_patient_uuid
+        has_pending = bool(session.pending_workflow or session.pending_clarification)
 
-        # ── Pass 1: primary LLM decision ──────────────────────────────
-        decision = self.reasoning.generate_conversational_response(
+        # ── Pass 0: deterministic pattern-based classifier ─────────────
+        # Handles common queries (help, count, list-all, create patient,
+        # search, view clinical data) without requiring the LLM at all.
+        # This ensures reliable operation with small models like llama3.2.
+        det_decision = try_deterministic_classify(
             prompt,
-            session_state=session.snapshot(),
-            has_file=bool(attachment_path),
+            pending_intent=(
+                session.pending_clarification.intent
+                if session.pending_clarification
+                else None
+            ),
+            collected_entities=(
+                session.pending_clarification.collected_entities
+                if session.pending_clarification
+                else None
+            ),
         )
 
-        # ── Pass 2 (conditional): run fallback only when intent is missing/unsupported ──
-        # Replaces the old 3-pass repair → operational_resolver chain.
-        if decision.mode != "inform" and not self._is_supported_intent(decision.intent):
-            decision = self.reasoning.run_fallback_decision(
+        if det_decision is not None:
+            decision = det_decision
+        else:
+            # ── Pass 1: primary LLM decision ──────────────────────────────
+            decision = self.reasoning.generate_conversational_response(
                 prompt,
-                decision,
                 session_state=session.snapshot(),
                 has_file=bool(attachment_path),
             )
 
-        # ── Clarification resolution (when a slot is in-flight) ───────
-        has_pending = bool(session.pending_workflow or session.pending_clarification)
-        if has_pending:
-            decision = self.reasoning.resolve_clarification_answer(
-                prompt,
-                decision,
-                session_state=session.snapshot(),
-            )
+            # ── Pass 2 (conditional): run fallback only when intent is missing/unsupported ──
+            if decision.mode != "inform" and not self._is_supported_intent(decision.intent):
+                decision = self.reasoning.run_fallback_decision(
+                    prompt,
+                    decision,
+                    session_state=session.snapshot(),
+                    has_file=bool(attachment_path),
+                )
+
+            # ── Clarification resolution (when a slot is in-flight) ───────
+            if has_pending and det_decision is None:
+                decision = self.reasoning.resolve_clarification_answer(
+                    prompt,
+                    decision,
+                    session_state=session.snapshot(),
+                )
+
+            # Sanitize LLM response to strip leaked prompt context
+            if decision.response_message:
+                decision = decision.model_copy(
+                    update={"response_message": sanitize_response_message(decision.response_message)}
+                )
+            if decision.clarifying_question:
+                decision = decision.model_copy(
+                    update={"clarifying_question": sanitize_response_message(decision.clarifying_question)}
+                )
 
         # ── Scope-based stale context clearance ───────────────────────
         # If the user started a fresh global query (not a follow-up) and
@@ -117,6 +148,28 @@ class ChatAgentService:
         is_global = decision.scope == "global" or is_global_intent(decision.intent or "")
         if is_global and not has_pending and decision.mode == "action":
             self.sessions.clear_stale_context(session)
+
+        # ── Deterministic entity pre-merge from pending clarification slot ────
+        # After all passes, merge any already-collected slot entities into
+        # the decision entities so the handler always sees the full picture,
+        # even when the LLM drops previously-extracted fields during slot-fill.
+        if session.pending_clarification and decision.entities is not None:
+            slot_entities = session.pending_clarification.collected_entities or {}
+            if slot_entities and (decision.intent == session.pending_clarification.intent):
+                # New values take priority; slot values fill gaps
+                merged = {**slot_entities, **{k: v for k, v in decision.entities.items() if v not in (None, "", [], {})}}
+                decision = decision.model_copy(update={"entities": merged})
+
+                # ── Force mode=action when all required fields are satisfied ──
+                if decision.mode == "clarify" and decision.intent:
+                    capability = get_capability(decision.intent)
+                    if capability:
+                        required_fields = {f.name for f in capability.fields if f.required}
+                        if required_fields and all(
+                            merged.get(f) not in (None, "", [], {})
+                            for f in required_fields
+                        ):
+                            decision = decision.model_copy(update={"mode": "action", "missing_fields": []})
 
         workflow: list[WorkflowStep] = [
             WorkflowStep(
@@ -481,8 +534,23 @@ class ChatAgentService:
 
     def _handle_search_patient(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "read:patient")
-        query = entities.get("patient_query") or prompt
+        query = (entities.get("patient_query") or "").strip()
         search_mode = entities.get("search_mode", "default")
+
+        # List-all branch: no specific name given → fetch all patients
+        if not query or query.lower() in {"all", "*", "everyone", "all patients"}:
+            results = self.patients.list_all()
+            workflow.append(WorkflowStep(status="completed", title="Patient list", detail=f"{len(results)} record(s) fetched."))
+            summary = self._format_list_all_summary(results)
+            return ChatResponseEnvelope(
+                intent="search_patient",
+                message=summary,
+                workflow=workflow,
+                patient_context=None,
+                data=results,
+                summary=summary,
+            )
+
         results = self.patients.search(query, search_mode=search_mode)
         workflow.append(WorkflowStep(status="completed", title="Patient search", detail=f"{len(results)} record(s) found."))
         # Do NOT set patient_context for search results — resolving a list of
@@ -518,6 +586,26 @@ class ChatAgentService:
             message = f"There are {count} patients available in the connected OpenMRS search scope."
         workflow.append(WorkflowStep(status="completed", title="Population query executed", detail=f"{count} patient record(s) counted."))
         return ChatResponseEnvelope(intent="count_patients", message=message, workflow=workflow, data=data, summary=message)
+
+    @staticmethod
+    def _format_list_all_summary(results: list[dict[str, Any]]) -> str:
+        """Format a natural-language summary of all patients in OpenMRS."""
+        if not results:
+            return "There are no patients registered in the connected OpenMRS system."
+        displays = [
+            str(item.get("display", "Unknown")).strip()
+            for item in results
+            if str(item.get("display", "")).strip()
+        ]
+        total = len(displays)
+        shown = displays[:10]
+        names = ", ".join(shown)
+        extra = total - len(shown)
+        suffix = f", and {extra} more" if extra else ""
+        return (
+            f"There {'is' if total == 1 else 'are'} **{total}** patient{'s' if total != 1 else ''} "
+            f"registered in OpenMRS: {names}{suffix}."
+        )
 
     @staticmethod
     def _format_search_summary(query: str, results: list[dict[str, Any]], *, search_mode: str = "default") -> str:
