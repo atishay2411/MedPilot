@@ -131,10 +131,31 @@ def classify_intent(payload: IntentRequest, service: IntentService = Depends(get
     return ApiResponse(data=service.classify(payload.prompt))
 
 
+@router.get("/patients")
+def list_patients(
+    q: str = "",
+    limit: int = 20,
+    startIndex: int = 0,
+    actor: Actor = Depends(get_actor),
+    service: PatientService = Depends(get_patient_service),
+) -> ApiResponse:
+    """Browse or search existing OpenMRS patients.
+    - No `q` → paginated list of all patients (Browse All).
+    - With `q`  → text search, returns matching results.
+    """
+    ensure_permission(actor, "read:patient")
+    if q.strip():
+        results = service.search(q.strip())
+        return ApiResponse(data={"results": results, "has_more": False, "count": len(results)})
+    return ApiResponse(data=service.list_all(limit=limit, start_index=startIndex))
+
+
 @router.post("/patients/search")
 def search_patients(payload: dict, actor: Actor = Depends(get_actor), service: PatientService = Depends(get_patient_service)) -> ApiResponse:
     ensure_permission(actor, "read:patient")
     return ApiResponse(data=service.search(payload["query"]))
+
+
 
 
 @router.get("/patients/{patient_uuid}/summary")

@@ -19,9 +19,7 @@ class PatientService:
     def search(self, query: str, *, search_mode: str = "default") -> list[dict[str, Any]]:
         normalized_query = query.strip()
         if not normalized_query:
-            return self.list_all()
-        if normalized_query.lower() in {"all", "all patients", "everyone", "*"}:
-            return self.list_all()
+            return []
         if search_mode == "starts_with":
             return self._search_by_name_filter(normalized_query, mode="starts_with")
         if search_mode == "contains":
@@ -33,15 +31,19 @@ class PatientService:
             return self.search_by_identifier(normalized_query)
         return results
 
-    def list_all(self, *, limit: int = 100) -> list[dict[str, Any]]:
-        bundle = self.client.get("/ws/fhir2/R4/Patient", params={"_count": limit})
-        results: list[dict[str, Any]] = []
-        for entry in bundle.get("entry", []):
-            resource = entry.get("resource", {})
-            normalized = self._normalize_fhir_patient(resource)
-            if normalized.get("uuid"):
-                results.append(normalized)
-        return results
+    def list_all(self, *, limit: int = 20, start_index: int = 0) -> dict[str, Any]:
+        """Return a paginated page of ALL patients from OpenMRS REST API."""
+        params = {"limit": limit, "startIndex": start_index, "v": "default"}
+        response = self.client.get("/ws/rest/v1/patient", params=params)
+        results = response.get("results", [])
+        # OpenMRS includes a links list with rel=next when more pages exist
+        has_more = any(link.get("rel") == "next" for link in response.get("links", []))
+        return {
+            "results": results,
+            "has_more": has_more,
+            "start_index": start_index,
+            "count": len(results),
+        }
 
     def get_demographics(self, patient_uuid: str) -> dict[str, Any]:
         return self.client.get(f"/ws/fhir2/R4/Patient/{patient_uuid}")

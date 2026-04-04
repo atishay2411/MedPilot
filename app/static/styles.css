@@ -852,6 +852,184 @@ button:disabled {
   margin-bottom: 6px;
 }
 
+/* ── Patient Browser ───────────────────────────────────────────────── */
+.patient-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.browser-search-row {
+  display: flex;
+  gap: 6px;
+}
+
+.browser-search {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.79rem;
+  transition: border-color var(--transition-fast);
+}
+
+.browser-search::placeholder {
+  color: var(--text-muted);
+}
+
+.browser-search:focus {
+  outline: none;
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.08);
+}
+
+.browse-all-btn {
+  padding: 0 14px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--accent-blue);
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.browse-all-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: var(--accent-blue);
+}
+
+.browse-all-btn:disabled {
+  opacity: 0.45;
+}
+
+/* Patient list */
+.patient-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 210px;
+  overflow-y: auto;
+  border-radius: var(--radius-sm);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.15) transparent;
+}
+
+.patient-list::-webkit-scrollbar { width: 4px; }
+.patient-list::-webkit-scrollbar-track { background: transparent; }
+.patient-list::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.15);
+  border-radius: 2px;
+}
+
+.patient-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.patient-row:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-color);
+}
+
+.patient-row.selected {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+.patient-row .pr-name {
+  font-weight: 500;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+}
+
+.patient-row .pr-id {
+  font-size: 0.69rem;
+  color: var(--text-muted);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+/* Browser hint / empty state */
+.browser-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 8px 4px;
+  line-height: 1.5;
+}
+
+.browser-hint.error {
+  color: var(--accent-red);
+  font-style: normal;
+}
+
+/* Loading animation */
+.browser-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 14px;
+}
+
+.loading-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  animation: loading-pulse 1.2s infinite ease-in-out;
+}
+
+.loading-dot:nth-child(1) { animation-delay: 0ms; }
+.loading-dot:nth-child(2) { animation-delay: 200ms; }
+.loading-dot:nth-child(3) { animation-delay: 400ms; }
+
+@keyframes loading-pulse {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+  40%           { opacity: 1;    transform: scale(1); }
+}
+
+/* Pagination */
+.browser-pagination {
+  text-align: center;
+}
+
+.load-more-btn {
+  width: 100%;
+  padding: 7px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px dashed var(--border-color);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.load-more-btn:hover {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+  background: rgba(59, 130, 246, 0.06);
+}
+
 /* ── Muted ─────────────────────────────────────────────────────────── */
 .muted {
   color: var(--text-muted);
