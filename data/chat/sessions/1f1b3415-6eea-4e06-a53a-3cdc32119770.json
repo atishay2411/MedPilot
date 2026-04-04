@@ -1,0 +1,130 @@
+{
+  "id": "1f1b3415-6eea-4e06-a53a-3cdc32119770",
+  "created_at": "2026-04-04T18:02:27.034719+00:00",
+  "updated_at": "2026-04-04T18:22:13.604523+00:00",
+  "current_patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376",
+  "current_patient_display": "647386E - Nesh Test",
+  "last_intent": "search_patient",
+  "recent_turns": [
+    {
+      "role": "user",
+      "content": "Find patient Nesh test",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I found 1 patient candidate(s) for 'Nesh test'.",
+      "intent": "search_patient",
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "user",
+      "content": "Is there a patient called Nesh test?",
+      "intent": null,
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "assistant",
+      "content": "I found 0 patient candidate(s) for 'Is there a patient called Nesh test?'.",
+      "intent": "search_patient",
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "user",
+      "content": "Is there a patient called Nesh test?",
+      "intent": null,
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "assistant",
+      "content": "I found 1 patient candidate(s) for 'Nesh test'.",
+      "intent": "search_patient",
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "user",
+      "content": "find any related patient whose name is Nesh test",
+      "intent": null,
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "assistant",
+      "content": "I found 0 patient candidate(s) for 'any related patient whose name is Nesh test'.",
+      "intent": "search_patient",
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "user",
+      "content": "is there a patient called Nesh?",
+      "intent": null,
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "assistant",
+      "content": "I found 2 patient candidate(s) for 'Nesh'.",
+      "intent": "search_patient",
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "user",
+      "content": "Find any patient whose name starts with N",
+      "intent": null,
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "assistant",
+      "content": "I found 2 patient candidate(s) for 'Nesh'.",
+      "intent": "search_patient",
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "user",
+      "content": "Find any patient whose name starts with N",
+      "intent": null,
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "assistant",
+      "content": "I found 0 patient candidate(s) for 'N'.",
+      "intent": "search_patient",
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "user",
+      "content": "Find any patient whose name starts with N",
+      "intent": null,
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "assistant",
+      "content": "I found 4 patient candidate(s) for 'N' using prefix matching.",
+      "intent": "search_patient",
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "user",
+      "content": "Find any patient whose name starts with N and list them",
+      "intent": null,
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "assistant",
+      "content": "I found 4 patient candidate(s) for 'N' using prefix matching.",
+      "intent": "search_patient",
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "user",
+      "content": "Final all patients whose names start with N and list them",
+      "intent": null,
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    },
+    {
+      "role": "assistant",
+      "content": "I could not find any patients matching 'Final all patients whose names start with N and list them'.",
+      "intent": "search_patient",
+      "patient_uuid": "1834caa3-6744-429d-8d61-99fc712cc376"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import re
 from typing import Any
 
 from app.clients.openmrs import OpenMRSClient
@@ -15,8 +16,15 @@ class PatientService:
         self.client = client
         self.settings = settings
 
-    def search(self, query: str) -> list[dict[str, Any]]:
-        return self.client.get("/ws/rest/v1/patient", params={"q": query}).get("results", [])
+    def search(self, query: str, *, search_mode: str = "default") -> list[dict[str, Any]]:
+        normalized_query = query.strip()
+        if not normalized_query:
+            return []
+        if search_mode == "starts_with":
+            return self._search_by_name_filter(normalized_query, mode="starts_with")
+        if search_mode == "contains":
+            return self._search_by_name_filter(normalized_query, mode="contains")
+        return self.client.get("/ws/rest/v1/patient", params={"q": normalized_query}).get("results", [])
 
     def get_demographics(self, patient_uuid: str) -> dict[str, Any]:
         return self.client.get(f"/ws/fhir2/R4/Patient/{patient_uuid}")
@@ -120,3 +128,61 @@ class PatientService:
             if any(query_lower == str(item.get("identifier", "")).lower() for item in identifiers):
                 return result
         return results[0]
+
+    def _search_by_name_filter(self, query: str, *, mode: str) -> list[dict[str, Any]]:
+        combined: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for result in self.client.get("/ws/rest/v1/patient", params={"q": query}).get("results", []):
+            uuid = str(result.get("uuid", ""))
+            if uuid and uuid not in seen:
+                seen.add(uuid)
+                combined.append(result)
+
+        try:
+            bundle = self.client.get("/ws/fhir2/R4/Patient", params={"name": query, "_count": 100})
+        except Exception:
+            bundle = {}
+        for entry in bundle.get("entry", []):
+            resource = entry.get("resource", {})
+            normalized = self._normalize_fhir_patient(resource)
+            uuid = str(normalized.get("uuid", ""))
+            if uuid and uuid not in seen:
+                seen.add(uuid)
+                combined.append(normalized)
+
+        return [result for result in combined if self._matches_name_mode(result, query, mode=mode)]
+
+    def _normalize_fhir_patient(self, resource: dict[str, Any]) -> dict[str, Any]:
+        identifiers = [
+            {"identifier": item.get("value", "")}
+            for item in resource.get("identifier", [])
+            if item.get("value")
+        ]
+        return {
+            "uuid": resource.get("id"),
+            "display": self.format_patient_display(resource),
+            "identifiers": identifiers,
+            "resource": resource,
+        }
+
+    @staticmethod
+    def _matches_name_mode(result: dict[str, Any], query: str, *, mode: str) -> bool:
+        display = str(result.get("display", "")).strip().lower()
+        if not display:
+            return False
+
+        query_lower = query.strip().lower()
+        display_tokens = [token for token in re.split(r"\s+", display) if token]
+        query_tokens = [token for token in re.split(r"\s+", query_lower) if token]
+
+        if mode == "starts_with":
+            if len(query_tokens) == 1:
+                return any(token.startswith(query_tokens[0]) for token in display_tokens)
+            return display.startswith(query_lower) or all(
+                any(token.startswith(part) for token in display_tokens)
+                for part in query_tokens
+            )
+        if mode == "contains":
+            return query_lower in display
+        return query_lower == display

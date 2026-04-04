@@ -42,10 +42,12 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = 10.0
     max_retries: int = 3
     audit_log_path: Path = Field(default=Path("data/audit/audit.log"))
+    chat_sessions_path: Path = Field(default=Path("data/chat/sessions"))
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     settings = Settings()
     settings.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.chat_sessions_path.mkdir(parents=True, exist_ok=True)
     return settings

@@ -13,6 +13,39 @@ def test_prompt_parser_extracts_create_patient_entities():
     assert parsed.entities["gender"] == "M"
 
 
+def test_prompt_parser_extracts_create_patient_entities_from_natural_sentence():
+    parser = PromptParser()
+    parsed = parser.parse("Add patient Nesh Lopez, who is a Male and was born on 4 apr 2000")
+
+    assert parsed.intent == "create_patient"
+    assert parsed.entities["given_name"] == "Nesh"
+    assert parsed.entities["family_name"] == "Lopez"
+    assert parsed.entities["birthdate"] == "2000-04-04"
+    assert parsed.entities["gender"] == "M"
+
+
+def test_prompt_parser_extracts_create_patient_entities_from_article_style_prompt():
+    parser = PromptParser()
+    parsed = parser.parse("Add a patient Test Test who is a male and was born on 24 apr 2000 in Chicago")
+
+    assert parsed.intent == "create_patient"
+    assert parsed.entities["given_name"] == "Test"
+    assert parsed.entities["family_name"] == "Test"
+    assert parsed.entities["birthdate"] == "2000-04-24"
+    assert parsed.entities["gender"] == "M"
+    assert parsed.entities["city_village"] == "Chicago"
+
+
+def test_prompt_parser_accepts_numeric_demo_last_name():
+    parser = PromptParser()
+    parsed = parser.parse("Add a patient Test 123 who is a male and was born on 24 apr 1000 in Chicago")
+
+    assert parsed.intent == "create_patient"
+    assert parsed.entities["given_name"] == "Test"
+    assert parsed.entities["family_name"] == "123"
+    assert parsed.entities["birthdate"] == "1000-04-24"
+
+
 def test_prompt_parser_uses_context_for_this_patient_analysis():
     parser = PromptParser()
     parsed = parser.parse("Analyze this patient for urgent issues")
@@ -65,3 +98,36 @@ def test_prompt_parser_extracts_medication_dispense_entities():
     assert parsed.intent == "create_medication_dispense"
     assert parsed.entities["drug_name"] == "Paracetamol"
     assert parsed.entities["quantity"] == 20.0
+
+
+def test_prompt_parser_extracts_switch_patient_intent():
+    parser = PromptParser()
+    parsed = parser.parse("Change patient to Maria Santos")
+
+    assert parsed.intent == "switch_patient"
+    assert parsed.entities["patient_query"] == "Maria Santos"
+
+
+def test_prompt_parser_extracts_patient_search_from_question_style_prompt():
+    parser = PromptParser()
+    parsed = parser.parse("Is there a patient called Nesh test?")
+
+    assert parsed.intent == "search_patient"
+    assert parsed.entities["patient_query"] == "Nesh test"
+
+
+def test_prompt_parser_extracts_patient_search_from_conversational_find_prompt():
+    parser = PromptParser()
+    parsed = parser.parse("find any related patient whose name is Nesh test")
+
+    assert parsed.intent == "search_patient"
+    assert parsed.entities["patient_query"] == "Nesh test"
+
+
+def test_prompt_parser_extracts_prefix_patient_search():
+    parser = PromptParser()
+    parsed = parser.parse("Find any patient whose name starts with N")
+
+    assert parsed.intent == "search_patient"
+    assert parsed.entities["patient_query"] == "N"
+    assert parsed.entities["search_mode"] == "starts_with"

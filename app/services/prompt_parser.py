@@ -39,13 +39,16 @@ class PromptParser:
         if "health gorilla" in lowered and any(token in lowered for token in ["sync", "import", "retrieve"]):
             return ParsedIntent(intent="sync_health_gorilla", write=True, confidence=0.95, entities=self._extract_person_entities(prompt))
 
+        if any(token in lowered for token in ["change patient", "switch patient", "use patient", "set patient"]):
+            return ParsedIntent(intent="switch_patient", write=False, confidence=0.95, entities={"patient_query": self._extract_switch_patient_query(prompt)})
+
         if any(token in lowered for token in ["metadata", "capabilities", "capability statement"]):
             return ParsedIntent(intent="get_metadata", write=False, confidence=0.9, entities={})
 
-        if self._is_patient_intake(lowered):
-            return ParsedIntent(intent="patient_intake", write=True, confidence=0.94, entities=self._extract_patient_intake_entities(prompt))
-
-        if any(token in lowered for token in ["register patient", "add patient", "create patient"]):
+        if self._is_patient_creation_request(lowered):
+            intake_entities = self._extract_patient_intake_entities(prompt)
+            if self._has_intake_content(intake_entities):
+                return ParsedIntent(intent="patient_intake", write=True, confidence=0.94, entities=intake_entities)
             return ParsedIntent(intent="create_patient", write=True, confidence=0.95, entities=self._extract_registration_entities(prompt))
 
         if "encounter" in lowered and any(token in lowered for token in ["start", "create", "new"]):
@@ -57,8 +60,16 @@ class PromptParser:
         if any(token in lowered for token in ["summarize", "summary", "analyze", "analysis", "overview"]):
             return ParsedIntent(intent="patient_analysis", write=False, confidence=0.9, entities={"patient_query": self._extract_patient_query(prompt)})
 
-        if any(token in lowered for token in ["find patient", "search patient", "look up patient"]):
-            return ParsedIntent(intent="search_patient", write=False, confidence=0.9, entities={"patient_query": self._extract_patient_query(prompt) or self._strip_command(prompt)})
+        if self._is_patient_search_request(lowered):
+            return ParsedIntent(
+                intent="search_patient",
+                write=False,
+                confidence=0.9,
+                entities={
+                    "patient_query": self._extract_patient_query(prompt) or self._strip_search_wrapper(prompt),
+                    "search_mode": self._extract_search_mode(prompt),
+                },
+            )
 
         if any(token in lowered for token in ["show vitals", "show observations", "last hba1c", "what is the patient's", "show last"]) or self._contains_vital(lowered):
             if any(token in lowered for token in ["record ", "add ", "log "]) and self._contains_vital(lowered):
@@ -99,29 +110,46 @@ class PromptParser:
         return ParsedIntent(intent="search_patient", write=False, confidence=0.45, entities={"patient_query": self._strip_command(prompt)})
 
     @staticmethod
-    def _is_patient_intake(lowered_prompt: str) -> bool:
-        create_markers = ["register patient", "add patient", "create patient", "new patient", "patient named"]
-        clinical_markers = [
-            "diagnosis",
-            "diagnoses",
-            "disease",
-            "condition",
-            "allergy",
-            "allergies",
-            "blood pressure",
-            "bp",
-            "weight",
-            "height",
-            "temperature",
-            "temp",
-            "spo2",
-            "respiratory",
-            "prescribe",
-            "medication",
-            "dispense",
-            "with ",
+    def _is_patient_creation_request(lowered_prompt: str) -> bool:
+        create_markers = [
+            "register patient",
+            "register a patient",
+            "add patient",
+            "add a patient",
+            "create patient",
+            "create a patient",
+            "new patient",
+            "patient named",
         ]
-        return any(marker in lowered_prompt for marker in create_markers) and any(marker in lowered_prompt for marker in clinical_markers)
+        return any(marker in lowered_prompt for marker in create_markers)
+
+    @staticmethod
+    def _is_patient_search_request(lowered_prompt: str) -> bool:
+        search_markers = [
+            "find patient",
+            "search patient",
+            "look up patient",
+            "is there a patient",
+            "is there any patient",
+            "do we have a patient",
+            "do we have any patient",
+            "patient called",
+            "patient named",
+            "patient whose name is",
+            "whose name is",
+        ]
+        if any(marker in lowered_prompt for marker in search_markers):
+            return True
+        if re.search(r"^(find|search|look up)\b", lowered_prompt) and "patient" in lowered_prompt:
+            return True
+        return False
+
+    @staticmethod
+    def _has_intake_content(entities: dict[str, Any]) -> bool:
+        return any(
+            entities.get(key)
+            for key in ["conditions", "allergies", "observations", "medications", "dispenses"]
+        )
 
     @staticmethod
     def _contains_vital(lowered_prompt: str) -> bool:
@@ -132,10 +160,32 @@ class PromptParser:
         return re.sub(r"^(find|search|look up|show|summarize|analyze)\s+", "", prompt, flags=re.IGNORECASE).strip()
 
     @staticmethod
+    def _strip_search_wrapper(prompt: str) -> str:
+        cleaned = prompt.strip().rstrip("?.!")
+        patterns = [
+            r"^(?:find|search|look up)\s+(?:any\s+|related\s+|matching\s+|possible\s+|similar\s+)*patient\s+(?:whose\s+name\s+(?:is|starts with|beginning with|begins with)\s+|called\s+|named\s+)?",
+            r"^(?:is there|is there any|do we have|do we have any)\s+(?:a\s+|any\s+)?patient\s+(?:called\s+|named\s+)?",
+            r"^patient\s+(?:called|named)\s+",
+            r"^(?:find|search|look up)\s+.*?\bwhose\s+name\s+is\s+",
+        ]
+        for pattern in patterns:
+            updated = re.sub(pattern, "", cleaned, flags=re.IGNORECASE).strip()
+            if updated != cleaned:
+                cleaned = updated
+                break
+        return cleaned.strip()
+
+    @staticmethod
     def _extract_patient_query(prompt: str) -> str | None:
         if re.search(r"\bthis patient\b", prompt, re.IGNORECASE):
             return None
         patterns = [
+            r"(?:patient\s+whose\s+name\s+(?:starts with|beginning with|begins with)\s+)([A-Za-z0-9][A-Za-z0-9'\-]*)",
+            r"(?:patient\s+whose\s+name\s+is\s+)([A-Za-z0-9][A-Za-z0-9'\-]+(?:\s+[A-Za-z0-9][A-Za-z0-9'\-]+){0,3})",
+            r"(?:patient\s+(?:called|named)\s+)([A-Za-z0-9][A-Za-z0-9'\-]+(?:\s+[A-Za-z0-9][A-Za-z0-9'\-]+){0,3})",
+            r"(?:whose\s+name\s+(?:starts with|beginning with|begins with)\s+)([A-Za-z0-9][A-Za-z0-9'\-]*)",
+            r"(?:whose\s+name\s+is\s+)([A-Za-z0-9][A-Za-z0-9'\-]+(?:\s+[A-Za-z0-9][A-Za-z0-9'\-]+){0,3})",
+            r"(?:is there|is there any|do we have|do we have any)\s+(?:a\s+|any\s+)?patient\s+(?:called\s+|named\s+)?([A-Za-z0-9][A-Za-z0-9'\-]+(?:\s+[A-Za-z0-9][A-Za-z0-9'\-]+){0,3})",
             r"(?:patient\s+id)\s+([A-Za-z0-9\-]+)",
             r"(?:patient|for|of)\s+([A-Za-z][A-Za-z'\-]+(?:\s+[A-Za-z][A-Za-z'\-]+){1,3})",
             r"(?:from\s+health gorilla\s+)([A-Za-z][A-Za-z'\-]+(?:\s+[A-Za-z][A-Za-z'\-]+){0,3})",
@@ -143,36 +193,115 @@ class PromptParser:
         for pattern in patterns:
             match = re.search(pattern, prompt, re.IGNORECASE)
             if match:
-                return match.group(1).strip()
+                return match.group(1).strip().rstrip("?.!")
+        return None
+
+    @staticmethod
+    def _extract_search_mode(prompt: str) -> str:
+        lowered = prompt.lower()
+        if any(token in lowered for token in ["starts with", "beginning with", "begins with", "start with"]):
+            return "starts_with"
+        if "contains" in lowered:
+            return "contains"
+        return "default"
+
+    @staticmethod
+    def _extract_switch_patient_query(prompt: str) -> str | None:
+        patterns = [
+            r"(?:change|switch|use|set)\s+patient\s+(?:to\s+)?([A-Za-z0-9][A-Za-z0-9 '\-]+)",
+            r"(?:change|switch)\s+to\s+patient\s+([A-Za-z0-9][A-Za-z0-9 '\-]+)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, prompt, re.IGNORECASE)
+            if match:
+                return match.group(1).strip().rstrip(".")
         return None
 
     def _extract_person_entities(self, prompt: str) -> dict[str, Any]:
         name_match = re.search(r"(?:sync|import|retrieve)\s+(?:patient\s+)?([A-Za-z][A-Za-z'\-]+)\s+([A-Za-z][A-Za-z'\-]+)", prompt, re.IGNORECASE)
-        birthdate_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", prompt)
         entities = {
             "given_name": name_match.group(1) if name_match else None,
             "family_name": name_match.group(2) if name_match else None,
-            "birthdate": birthdate_match.group(1) if birthdate_match else None,
+            "birthdate": self._extract_birthdate(prompt),
         }
         return entities
 
     def _extract_registration_entities(self, prompt: str) -> dict[str, Any]:
-        name_match = re.search(r"(?:register|add|create)\s+(?:a\s+new\s+)?patient(?:\s+named)?\s+([A-Za-z][A-Za-z'\-]+)(?:\s+([A-Za-z][A-Za-z'\-]+))?", prompt, re.IGNORECASE)
-        birthdate_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", prompt)
+        name_match = re.search(
+            r"(?:register|add|create)\s+(?:a\s+)?(?:new\s+)?patient(?:\s+named)?\s+([A-Za-z0-9][A-Za-z0-9'\-]+)(?:\s+([A-Za-z0-9][A-Za-z0-9'\-]+))?(?=,|\s+who\b|\s+that\b|\s+born\b|\s+was born\b|\s+dob\b|\s+with\b|\s+in\b|$)",
+            prompt,
+            re.IGNORECASE,
+        )
         gender = "U"
         gender_map = {"female": "F", "male": "M", "other": "O", "unknown": "U"}
         for word, code in gender_map.items():
             if re.search(rf"\b{word}\b", prompt, re.IGNORECASE):
                 gender = code
         tail_parts = [part.strip() for part in prompt.split(",")]
-        city = tail_parts[-1] if len(tail_parts) > 1 and "-" not in tail_parts[-1] else None
+        city = None
+        if len(tail_parts) > 1:
+            candidate = tail_parts[-1]
+            if candidate and not re.search(r"\b(male|female|other|unknown|born|birth|dob|with|allerg|condition|disease|weight|height|temperature|bp|blood pressure|prescribe|dispense)\b", candidate, re.IGNORECASE):
+                city = candidate
+        if not city:
+            city_match = re.search(r"\bin\s+([A-Za-z][A-Za-z '\-]+)\s*$", prompt, re.IGNORECASE)
+            if city_match:
+                city = city_match.group(1).strip().rstrip(".")
         return {
             "given_name": name_match.group(1) if name_match else None,
             "family_name": name_match.group(2) if name_match and name_match.group(2) else "Unknown",
-            "birthdate": birthdate_match.group(1) if birthdate_match else None,
+            "birthdate": self._extract_birthdate(prompt),
             "gender": gender,
             "city_village": city,
         }
+
+    @staticmethod
+    def _extract_birthdate(prompt: str) -> str | None:
+        iso_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", prompt)
+        if iso_match:
+            return iso_match.group(1)
+
+        candidates: list[str] = []
+        patterns = [
+            r"(?:born(?:\s+on)?|birth(?:date)?|dob(?:\s+is|:)?|was born on)\s+([A-Za-z0-9,\-/ ]+)",
+            r"\b(on\s+)?(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\b",
+            r"\b([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})\b",
+            r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{4})\b",
+        ]
+        for pattern in patterns:
+            for match in re.finditer(pattern, prompt, re.IGNORECASE):
+                value = next((group for group in match.groups()[::-1] if group), "")
+                value = re.split(r"(?:,?\s+(?:with|and|who|that)\b|[.;])", value, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+                if value:
+                    candidates.append(value)
+
+        for candidate in candidates:
+            normalized = PromptParser._normalize_date_candidate(candidate)
+            if normalized:
+                return normalized
+        return None
+
+    @staticmethod
+    def _normalize_date_candidate(value: str) -> str | None:
+        cleaned = re.sub(r"\b(on|the)\b", "", value, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.")
+        for fmt in (
+            "%d %b %Y",
+            "%d %B %Y",
+            "%b %d %Y",
+            "%B %d %Y",
+            "%b %d, %Y",
+            "%B %d, %Y",
+            "%d/%m/%Y",
+            "%m/%d/%Y",
+            "%d-%m-%Y",
+            "%m-%d-%Y",
+        ):
+            try:
+                return datetime.strptime(cleaned, fmt).strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        return None
 
     def _extract_patient_intake_entities(self, prompt: str) -> dict[str, Any]:
         registration = self._extract_registration_entities(prompt)

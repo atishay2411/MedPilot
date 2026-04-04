@@ -4,8 +4,10 @@ const patientUuidEl = document.getElementById("patient-uuid");
 const fileInputEl = document.getElementById("file-input");
 const patientContextEl = document.getElementById("patient-context");
 const llmBadgeEl = document.getElementById("llm-badge");
+const SESSION_STORAGE_KEY = "medpilot-session-id";
 
 const state = {
+  sessionId: window.localStorage.getItem(SESSION_STORAGE_KEY) || "",
   currentPatientUuid: "",
   currentPatientDisplay: "",
 };
@@ -20,6 +22,40 @@ function renderPatientContext() {
     <p class="muted">UUID: ${escapeHtml(state.currentPatientUuid)}</p>
   `;
   patientUuidEl.value = state.currentPatientUuid;
+}
+
+function applySessionState(sessionState) {
+  if (!sessionState) return;
+  if (sessionState.id) {
+    state.sessionId = sessionState.id;
+    window.localStorage.setItem(SESSION_STORAGE_KEY, state.sessionId);
+  }
+  state.currentPatientUuid = sessionState.current_patient_uuid || "";
+  state.currentPatientDisplay = sessionState.current_patient_display || "";
+  renderPatientContext();
+}
+
+async function ensureSession() {
+  if (state.sessionId) return state.sessionId;
+  const response = await fetch("/api/chat/session", { method: "POST" });
+  const payload = await response.json();
+  if (!response.ok || payload.ok === false) {
+    throw new Error("Unable to create chat session.");
+  }
+  applySessionState(payload.data);
+  return state.sessionId;
+}
+
+async function restoreSession() {
+  if (!state.sessionId) return;
+  const response = await fetch(`/api/chat/session/${encodeURIComponent(state.sessionId)}`);
+  const payload = await response.json();
+  if (!response.ok || payload.ok === false) {
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    state.sessionId = "";
+    return;
+  }
+  applySessionState(payload.data);
 }
 
 function escapeHtml(value) {
@@ -100,8 +136,13 @@ function renderPendingAction(pendingAction) {
 }
 
 function renderAssistantResponse(payload) {
+  if (payload.session_id) {
+    state.sessionId = payload.session_id;
+    window.localStorage.setItem(SESSION_STORAGE_KEY, payload.session_id);
+  }
+  applySessionState(payload.session_state);
   const patientContext = payload.patient_context;
-  if (patientContext?.uuid) {
+  if (patientContext?.uuid && !payload.session_state) {
     state.currentPatientUuid = patientContext.uuid;
     state.currentPatientDisplay = patientContext.display || patientContext.uuid;
     renderPatientContext();
@@ -125,8 +166,10 @@ function renderAssistantResponse(payload) {
 }
 
 async function sendChat(prompt, file = null) {
+  await ensureSession();
   const formData = new FormData();
   formData.append("prompt", prompt);
+  formData.append("session_id", state.sessionId);
   if (patientUuidEl.value.trim()) {
     formData.append("patient_uuid", patientUuidEl.value.trim());
   }
@@ -229,9 +272,13 @@ appendMessage(
       <strong>MedPilot</strong>
       <span>ready</span>
     </div>
-    <div>Ask for patient search, chart summarization, patient analysis, condition updates, allergy changes, medication stop orders, PDF ingestion, or Health Gorilla sync. I will resolve intent, gather context, and either answer directly or prepare a confirmation-gated workflow.</div>
+    <div>Ask for patient search, chart summarization, condition updates, patient intake, or patient switching like “change patient to Maria Santos.” I will keep session memory, reuse the active patient when you say “this patient,” and prepare confirmation-gated workflows for writes.</div>
   `,
 );
 
 renderPatientContext();
 refreshLLMStatus();
+(async () => {
+  await restoreSession().catch(() => {});
+  await ensureSession().catch(() => {});
+})();
