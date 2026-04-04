@@ -3,104 +3,77 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MedPilot</title>
+    <title>MedPilot Copilot</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div class="shell">
-      <aside class="hero">
-        <p class="eyebrow">OpenMRS Clinical Copilot</p>
-        <h1>MedPilot</h1>
-        <p class="lede">Production-grade workflows for patient search, preview-gated writes, PDF ingestion, and Health Gorilla sync.</p>
-        <div class="hero-card">
-          <p>Safety rails built in</p>
-          <ul>
-            <li>RBAC-aligned access model</li>
-            <li>Explicit write previews</li>
-            <li>DELETE hard confirmation</li>
-            <li>Append-only audit logging</li>
-          </ul>
+      <aside class="sidebar">
+        <div class="brand">
+          <p class="eyebrow">OpenMRS Agentic Copilot</p>
+          <h1>MedPilot</h1>
+          <p class="lede">Natural-language workflows for search, chart summarization, patient analysis, chart updates, PDF ingestion, and Health Gorilla sync.</p>
         </div>
+
+        <section class="sidebar-card">
+          <h2>Current Context</h2>
+          <div id="patient-context" class="context-card">
+            <p>No patient selected yet.</p>
+          </div>
+          <label class="field-label" for="patient-uuid">Override Patient UUID</label>
+          <input id="patient-uuid" type="text" placeholder="Optional UUID for 'this patient'" />
+        </section>
+
+        <section class="sidebar-card">
+          <h2>Suggested Prompts</h2>
+          <div class="chip-list">
+            <button class="chip" data-prompt="Find patient Maria Santos">Find patient</button>
+            <button class="chip" data-prompt="Summarize patient Maria Santos">Summarize patient</button>
+            <button class="chip" data-prompt="Analyze this patient for urgent issues">Analyze chart</button>
+            <button class="chip" data-prompt="Add patient John Doe, male, born 1990-05-12, Nairobi">Register patient</button>
+            <button class="chip" data-prompt="Add a new patient named John Doe, male, born 1990-05-12, with diabetes and hypertension, allergies penicillin and aspirin, blood pressure 140/90, weight 80, prescribe Metformin 500 tablet oral twice daily for 30 days">Full intake</button>
+            <button class="chip" data-prompt="Add diagnosis: Type 2 Diabetes, active, confirmed, onset 2020-01-01 for patient Maria Santos">Add condition</button>
+            <button class="chip" data-prompt="Record blood pressure 140/90 for patient Maria Santos">Record vitals</button>
+            <button class="chip" data-prompt="Start a new encounter for this patient at Outpatient Clinic">Create encounter</button>
+            <button class="chip" data-prompt="Prescribe Metformin 500 tablet oral twice daily for 30 days for patient Maria Santos">Order medication</button>
+            <button class="chip" data-prompt="Record dispensing of 20 tablets of Paracetamol for patient Maria Santos">Dispense medication</button>
+            <button class="chip" data-prompt="Remove the Penicillin allergy for patient Maria Santos">Delete allergy</button>
+            <button class="chip" data-prompt="Sync patient John Doe 1990-05-12 from Health Gorilla">Sync HG</button>
+          </div>
+        </section>
+
+        <section class="sidebar-card">
+          <h2>Safety Rails</h2>
+          <ul class="plain-list">
+            <li>Every write becomes a preview before execution.</li>
+            <li>Delete actions require typed `DELETE` confirmation.</li>
+            <li>Patient analysis is evidence-grounded and chart-based.</li>
+            <li>All agent actions are logged to the audit trail.</li>
+          </ul>
+        </section>
       </aside>
-      <main class="workspace">
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Patient Search</h2>
-          </div>
-          <form id="search-form" class="grid-form">
-            <input id="search-query" type="text" placeholder="Find patient by name or ID" />
-            <button type="submit">Search</button>
-          </form>
-          <div id="search-results" class="results"></div>
-        </section>
 
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Create Patient</h2>
+      <main class="chat-shell">
+        <header class="chat-header">
+          <div>
+            <p class="eyebrow">Clinician Workspace</p>
+            <h2>Ask MedPilot to work the chart for you</h2>
           </div>
-          <form id="register-form" class="grid-form">
-            <input name="given_name" placeholder="First name" required />
-            <input name="family_name" placeholder="Last name" required />
-            <input name="birthdate" type="date" required />
-            <select name="gender" required>
-              <option value="F">Female</option>
-              <option value="M">Male</option>
-              <option value="O">Other</option>
-              <option value="U">Unknown</option>
-            </select>
-            <input name="address1" placeholder="Address" />
-            <input name="city_village" placeholder="City" />
-            <input name="country" placeholder="Country" />
-            <button type="submit">Preview Registration</button>
-          </form>
-          <pre id="registration-preview" class="preview-box"></pre>
-          <button id="confirm-registration" class="secondary" disabled>Confirm Patient Creation</button>
-        </section>
+          <div id="llm-badge" class="header-badge">LLM adapter ready</div>
+        </header>
 
-        <section class="panel">
-          <div class="panel-head">
-            <h2>PDF Ingestion</h2>
-          </div>
-          <form id="pdf-form" class="grid-form">
-            <input id="pdf-patient-uuid" type="text" placeholder="Patient UUID" required />
-            <input id="pdf-file" type="file" accept=".pdf" required />
-            <button type="button" id="preview-pdf">Preview PDF</button>
-            <button type="submit">Execute Ingestion</button>
-          </form>
-          <pre id="pdf-preview" class="preview-box"></pre>
-        </section>
+        <section id="transcript" class="transcript" aria-live="polite"></section>
 
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Health Gorilla Preview</h2>
+        <form id="chat-form" class="composer">
+          <textarea id="prompt" rows="4" placeholder="Try: Summarize this patient, record weight 77 kg, add diagnosis Type 2 Diabetes, or ingest the attached PDF."></textarea>
+          <div class="composer-row">
+            <label class="upload-label">
+              <span>Attach PDF</span>
+              <input id="file-input" type="file" accept=".pdf" />
+            </label>
+            <button type="submit" class="send-btn">Send</button>
           </div>
-          <form id="hg-form" class="grid-form">
-            <input name="given_name" placeholder="First name" required />
-            <input name="family_name" placeholder="Last name" required />
-            <input name="birthdate" type="date" required />
-            <button type="submit">Preview Import</button>
-          </form>
-          <pre id="hg-preview" class="preview-box"></pre>
-        </section>
-
-        <section class="panel warning-panel">
-          <div class="panel-head">
-            <h2>Destructive Confirmation</h2>
-          </div>
-          <form id="delete-form" class="grid-form">
-            <input id="delete-condition-uuid" type="text" placeholder="Condition UUID" required />
-            <input id="delete-patient-uuid" type="text" placeholder="Patient UUID (for audit)" required />
-            <input id="delete-confirm" type="text" placeholder="Type DELETE" required />
-            <button type="submit" class="danger">Delete Condition</button>
-          </form>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Event Feed</h2>
-          </div>
-          <div id="event-log" class="event-log"></div>
-        </section>
+        </form>
       </main>
     </div>
     <script type="module" src="/app.js"></script>

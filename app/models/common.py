@@ -32,3 +32,41 @@ class EntityResult(BaseModel):
 class CountResult(BaseModel):
     label: str
     count: int
+
+
+class WorkflowStep(BaseModel):
+    status: Literal["planned", "completed", "requires_confirmation", "blocked"]
+    title: str
+    detail: str
+
+
+class EvidenceItem(BaseModel):
+    label: str
+    resource_type: str
+    resource_uuid: str | None = None
+    note: str
+
+
+class PendingActionRecord(BaseModel):
+    id: str
+    action_kind: Literal["write", "workflow"]
+    intent: str
+    action: str
+    permission: str
+    endpoint: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    patient_uuid: str | None = None
+    destructive: bool = False
+    prompt: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatResponseEnvelope(BaseModel):
+    intent: str
+    message: str
+    workflow: list[WorkflowStep] = Field(default_factory=list)
+    patient_context: dict[str, Any] | None = None
+    data: Any | None = None
+    summary: str | None = None
+    evidence: list[EvidenceItem] = Field(default_factory=list)
+    pending_action: dict[str, Any] | None = None

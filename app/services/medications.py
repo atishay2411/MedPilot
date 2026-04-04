@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
 from app.clients.openmrs import OpenMRSClient
+from app.core.exceptions import ValidationError
 from app.services.lookups import LookupService
 
 
@@ -65,3 +68,30 @@ class MedicationService:
                 "dosageInstruction": [{"text": dosage_text}],
             },
         )
+
+    def find_by_name(self, patient_uuid: str, drug_name: str) -> dict[str, Any] | None:
+        entries = self.list_for_patient(patient_uuid).get("entry", [])
+        normalized = drug_name.lower()
+        for entry in entries:
+            resource = entry.get("resource", entry)
+            codeable = resource.get("medicationCodeableConcept", {})
+            display = (
+                ((codeable.get("coding") or [{}])[0].get("display"))
+                or codeable.get("text")
+                or (resource.get("medicationReference") or {}).get("display", "")
+            )
+            if display and normalized in display.lower():
+                return resource
+        return None
+
+    def resolve_medication_reference(self, patient_uuid: str, drug_name: str) -> str:
+        resource = self.find_by_name(patient_uuid, drug_name)
+        if resource:
+            medication_reference = (resource.get("medicationReference") or {}).get("reference")
+            if medication_reference:
+                return medication_reference
+        try:
+            drug_uuid = self.lookups.resolve_uuid("drug", drug_name)
+        except ValidationError as exc:
+            raise ValidationError(f"Could not resolve a medication reference for '{drug_name}'.") from exc
+        return f"Medication/{drug_uuid}"

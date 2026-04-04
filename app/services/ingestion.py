@@ -4,6 +4,7 @@ from app.clients.health_gorilla import HealthGorillaClient
 from app.clients.openmrs import OpenMRSClient
 from app.config import Settings
 from app.models.common import EntityResult
+from app.core.exceptions import ValidationError
 from app.parsers.patient_pdf import parse_patient_pdf
 from app.services.allergies import AllergyService
 from app.services.conditions import ConditionService
@@ -119,3 +120,23 @@ class IngestionService:
                 }
             )
         return {"matches": entries, "conditions": prepared}
+
+    def sync_health_gorilla(self, match_resource: dict, conditions: list[dict]) -> list[EntityResult]:
+        patient_payload = self.patients.build_create_payload_from_fhir(match_resource)
+        created_patient = self.patients.create(patient_payload)
+        patient_uuid = created_patient["uuid"]
+        results = [EntityResult(entity_type="patient", name=self.patients.format_patient_display(match_resource), outcome="success", detail=patient_uuid)]
+
+        for condition in conditions[: self.settings.health_gorilla_max_conditions]:
+            concept_uuid = self.conditions.resolve_or_create_concept_uuid(condition["condition_name"])
+            payload = {
+                "patient": patient_uuid,
+                "condition": {"coded": concept_uuid},
+                "clinicalStatus": condition.get("clinical_status", "active"),
+                "verificationStatus": condition.get("verification_status", "confirmed"),
+                "onsetDate": condition.get("onset_date"),
+            }
+            self.conditions.create(payload)
+            results.append(EntityResult(entity_type="condition", name=condition["condition_name"], outcome="success", detail="Imported from Health Gorilla"))
+
+        return results

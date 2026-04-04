@@ -12,16 +12,19 @@ from app.core.security import Actor, ensure_permission
 from app.dependencies import (
     get_allergy_service,
     get_audit_logger,
+    get_chat_agent_service,
     get_condition_service,
     get_encounter_service,
     get_ingestion_service,
     get_intent_service,
+    get_llm_provider,
     get_medication_service,
     get_observation_service,
     get_patient_service,
     get_population_service,
     get_summary_service,
 )
+from app.llm.base import LLMProvider
 from app.models.common import ApiResponse
 from app.models.domain import (
     AllergyInput,
@@ -38,6 +41,7 @@ from app.models.domain import (
     WriteExecutionRequest,
 )
 from app.services.allergies import AllergyService
+from app.services.chat_agent import ChatAgentService
 from app.services.conditions import ConditionService
 from app.services.encounters import EncounterService
 from app.services.ingestion import IngestionService
@@ -59,6 +63,52 @@ def get_actor(settings: Settings = Depends(get_settings)) -> Actor:
 @router.get("/health")
 def healthcheck() -> ApiResponse:
     return ApiResponse(data={"status": "ok"})
+
+
+@router.get("/llm/status")
+def llm_status(settings: Settings = Depends(get_settings), provider: LLMProvider = Depends(get_llm_provider)) -> ApiResponse:
+    return ApiResponse(
+        data={
+            "provider": settings.medpilot_llm_provider,
+            "model": settings.medpilot_llm_model,
+            "enabled": provider.enabled,
+            "intent_reasoning": settings.medpilot_llm_enable_intent_reasoning,
+            "summary_reasoning": settings.medpilot_llm_enable_summary_reasoning,
+        }
+    )
+
+
+@router.post("/chat")
+async def chat(
+    prompt: str = Form(...),
+    patient_uuid: str | None = Form(None),
+    file: UploadFile | None = File(None),
+    actor: Actor = Depends(get_actor),
+    service: ChatAgentService = Depends(get_chat_agent_service),
+) -> ApiResponse:
+    temp_path: Path | None = None
+    try:
+        if file:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename or "upload.bin").suffix or ".bin") as temp_file:
+                temp_file.write(await file.read())
+                temp_path = Path(temp_file.name)
+        response = service.handle_message(prompt, actor, patient_uuid=patient_uuid, attachment_path=str(temp_path) if temp_path else None)
+        return ApiResponse(data=response.model_dump())
+    except Exception:
+        if temp_path and temp_path.exists():
+            temp_path.unlink(missing_ok=True)
+        raise
+
+
+@router.post("/chat/confirm")
+def confirm_chat_action(
+    action_id: str = Form(...),
+    destructive_confirm_text: str | None = Form(None),
+    actor: Actor = Depends(get_actor),
+    service: ChatAgentService = Depends(get_chat_agent_service),
+) -> ApiResponse:
+    response = service.confirm_action(action_id, actor, destructive_confirm_text=destructive_confirm_text)
+    return ApiResponse(data=response.model_dump())
 
 
 @router.post("/intent")
