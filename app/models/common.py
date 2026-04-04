@@ -62,6 +62,46 @@ class PendingActionRecord(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class PendingWorkflowState(BaseModel):
+    intent: str | None = None
+    original_prompt: str | None = None
+    collected_entities: dict[str, Any] = Field(default_factory=dict)
+    missing_fields: list[str] = Field(default_factory=list)
+    clarifying_question: str | None = None
+    patient_uuid: str | None = None
+    patient_display: str | None = None
+
+
+class PendingClarificationSlot(BaseModel):
+    """Structured slot state for in-flight clarification — replaces the old plain-text string.
+
+    Stores enough deterministic state for slot-filling so that follow-up
+    answers like '24 Apr 2000' can be merged without LLM reconstruction.
+    """
+
+    question: str
+    """The clarifying question that was posed to the user."""
+
+    intent: str | None = None
+    """The intended action that is waiting for the missing information."""
+
+    collected_entities: dict[str, Any] = Field(default_factory=dict)
+    """Entities already extracted from the original (and any prior follow-up) message."""
+
+    missing_fields: list[str] = Field(default_factory=list)
+    """Fields still needed to complete the action."""
+
+    patient_uuid: str | None = None
+    """Active patient UUID at the time the clarification was issued, if any."""
+
+    patient_display: str | None = None
+    """Human-readable patient name at the time the clarification was issued."""
+
+    turn_count: int = 0
+    """How many clarification turns have been spent on this workflow.
+    Prevent infinite clarification loops (cap at 3)."""
+
+
 class ChatResponseEnvelope(BaseModel):
     session_id: str | None = None
     intent: str
@@ -73,6 +113,8 @@ class ChatResponseEnvelope(BaseModel):
     evidence: list[EvidenceItem] = Field(default_factory=list)
     pending_action: dict[str, Any] | None = None
     session_state: dict[str, Any] | None = None
+    scope: Literal["global", "patient"] | None = None
+    """Auto-detected query scope: 'global' for population-level queries, 'patient' for chart actions."""
 
 
 class ChatHistoryTurn(BaseModel):
@@ -89,6 +131,9 @@ class ChatSessionRecord(BaseModel):
     current_patient_uuid: str | None = None
     current_patient_display: str | None = None
     last_intent: str | None = None
+    pending_clarification: PendingClarificationSlot | None = None
+    """Structured in-flight clarification slot. Replaces old plain-text string."""
+    pending_workflow: PendingWorkflowState | None = None
     recent_turns: list[ChatHistoryTurn] = Field(default_factory=list)
 
     def snapshot(self) -> dict[str, Any]:
@@ -97,5 +142,7 @@ class ChatSessionRecord(BaseModel):
             "current_patient_uuid": self.current_patient_uuid,
             "current_patient_display": self.current_patient_display,
             "last_intent": self.last_intent,
-            "recent_turns": [turn.model_dump() for turn in self.recent_turns[-8:]],
+            "pending_clarification": self.pending_clarification.model_dump() if self.pending_clarification else None,
+            "pending_workflow": self.pending_workflow.model_dump() if self.pending_workflow else None,
+            "recent_turns": [turn.model_dump() for turn in self.recent_turns[-12:]],
         }

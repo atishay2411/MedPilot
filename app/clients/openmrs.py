@@ -55,8 +55,8 @@ class OpenMRSClient:
     def patch(self, path: str, payload: list[dict[str, Any]]) -> Any:
         return self._request("PATCH", path, json=payload, headers={"Content-Type": "application/json-patch+json"})
 
-    def delete(self, path: str) -> Any:
-        return self._request("DELETE", path)
+    def delete(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
+        return self._request("DELETE", path, params=params)
 
     def search(self, entity: str, query: str) -> list[dict[str, Any]]:
         response = self.get(f"/ws/rest/v1/{entity}", params={"q": query})

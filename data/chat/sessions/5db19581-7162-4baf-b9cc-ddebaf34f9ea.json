@@ -1,0 +1,132 @@
+{
+  "id": "5db19581-7162-4baf-b9cc-ddebaf34f9ea",
+  "created_at": "2026-04-04T19:08:34.994299+00:00",
+  "updated_at": "2026-04-04T21:28:08.829704+00:00",
+  "current_patient_uuid": null,
+  "current_patient_display": null,
+  "last_intent": "create_patient",
+  "pending_clarification": null,
+  "pending_workflow": null,
+  "recent_turns": [
+    {
+      "role": "user",
+      "content": "Find patient Nesh",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "What is the context or system where Nesh is a patient in? Or what information do you need to find her record?",
+      "intent": "clarify",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "delete all the patients",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: A patient name, identifier, or UUID is required for this action.",
+      "intent": "delete_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "How many patients are present in total?",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "There are no patients present in this session.",
+      "intent": "inform",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Add patient Nesh Rochwani",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Add patient nesh rochwani born on 24 april 2000 in Chicago",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Find patient Maria Santos",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "No patients found matching 'Find patient Maria Santos'.",
+      "intent": "search_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "What can you do?",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "There are no patients present in this session.",
+      "intent": "inform",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Add a patient named Nesh Rochwani",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Full name is Nesh Rochwani and dob is 24 April 2000",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Full name: Nesh Rochwani, born on 24 april 2000",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    }
+  ]
+}

@@ -1,27 +1,33 @@
+// ── DOM Elements ──────────────────────────────────────────────────────
 const transcriptEl = document.getElementById("transcript");
 const promptEl = document.getElementById("prompt");
-const patientUuidEl = document.getElementById("patient-uuid");
 const fileInputEl = document.getElementById("file-input");
+const uploadBtn = document.getElementById("upload-btn");
 const patientContextEl = document.getElementById("patient-context");
 const llmBadgeEl = document.getElementById("llm-badge");
+const welcomeScreen = document.getElementById("welcome-screen");
 const SESSION_STORAGE_KEY = "medpilot-session-id";
 
+// ── State ─────────────────────────────────────────────────────────────
 const state = {
   sessionId: window.localStorage.getItem(SESSION_STORAGE_KEY) || "",
   currentPatientUuid: "",
   currentPatientDisplay: "",
+  hasMessages: false,
 };
 
+// ── Patient context ───────────────────────────────────────────────────
 function renderPatientContext() {
   if (!state.currentPatientUuid) {
-    patientContextEl.innerHTML = "<p>No patient selected yet.</p>";
+    patientContextEl.innerHTML = '<span class="no-patient">No patient selected</span>';
+    patientContextEl.classList.remove("active");
     return;
   }
+  patientContextEl.classList.add("active");
   patientContextEl.innerHTML = `
-    <strong>${escapeHtml(state.currentPatientDisplay || "Resolved patient")}</strong>
-    <p class="muted">UUID: ${escapeHtml(state.currentPatientUuid)}</p>
+    <div class="patient-name"><span class="status-dot"></span>${escapeHtml(state.currentPatientDisplay || "Resolved Patient")}</div>
+    <div class="patient-uuid">${escapeHtml(state.currentPatientUuid)}</div>
   `;
-  patientUuidEl.value = state.currentPatientUuid;
 }
 
 function applySessionState(sessionState) {
@@ -35,13 +41,12 @@ function applySessionState(sessionState) {
   renderPatientContext();
 }
 
+// ── Session management ────────────────────────────────────────────────
 async function ensureSession() {
   if (state.sessionId) return state.sessionId;
   const response = await fetch("/api/chat/session", { method: "POST" });
   const payload = await response.json();
-  if (!response.ok || payload.ok === false) {
-    throw new Error("Unable to create chat session.");
-  }
+  if (!response.ok || payload.ok === false) throw new Error("Unable to create chat session.");
   applySessionState(payload.data);
   return state.sessionId;
 }
@@ -58,6 +63,18 @@ async function restoreSession() {
   applySessionState(payload.data);
 }
 
+function newChat() {
+  window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  state.sessionId = "";
+  state.currentPatientUuid = "";
+  state.currentPatientDisplay = "";
+  state.hasMessages = false;
+  renderPatientContext();
+  transcriptEl.innerHTML = "";
+  showWelcome();
+}
+
+// ── Utils ─────────────────────────────────────────────────────────────
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -70,7 +87,58 @@ function stringify(value) {
   return JSON.stringify(value, null, 2);
 }
 
+/** Simple markdown-like rendering: **bold**, *italic*, line breaks */
+function renderMarkdown(text) {
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/\n/g, "<br>");
+}
+
+// ── Welcome screen ────────────────────────────────────────────────────
+function showWelcome() {
+  if (welcomeScreen) {
+    welcomeScreen.style.display = "flex";
+    return;
+  }
+  // Rebuild if needed
+  const welcome = document.createElement("div");
+  welcome.id = "welcome-screen";
+  welcome.className = "welcome-screen";
+  welcome.innerHTML = `
+    <div class="welcome-icon">🏥</div>
+    <h2 class="welcome-title">How can I help you today?</h2>
+    <p class="welcome-subtitle">I'm your AI clinical copilot. Ask me anything in plain language.</p>
+  `;
+  transcriptEl.prepend(welcome);
+}
+
+function hideWelcome() {
+  const welcome = document.getElementById("welcome-screen");
+  if (welcome) welcome.style.display = "none";
+}
+
+// ── Typing indicator ──────────────────────────────────────────────────
+function showTypingIndicator() {
+  const existing = document.getElementById("typing-indicator");
+  if (existing) return;
+  const indicator = document.createElement("div");
+  indicator.id = "typing-indicator";
+  indicator.className = "typing-indicator";
+  indicator.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+  transcriptEl.appendChild(indicator);
+  transcriptEl.scrollTop = transcriptEl.scrollHeight;
+}
+
+function removeTypingIndicator() {
+  const indicator = document.getElementById("typing-indicator");
+  if (indicator) indicator.remove();
+}
+
+// ── Message rendering ─────────────────────────────────────────────────
 function appendMessage(role, content) {
+  hideWelcome();
+  state.hasMessages = true;
   const card = document.createElement("article");
   card.className = `message ${role}`;
   card.innerHTML = content;
@@ -82,7 +150,7 @@ function renderWorkflow(workflow = []) {
   if (!workflow.length) return "";
   return `
     <ul class="workflow">
-      ${workflow.map((step) => `<li><strong>${escapeHtml(step.title)}</strong>: ${escapeHtml(step.detail)} <span class="muted">(${escapeHtml(step.status)})</span></li>`).join("")}
+      ${workflow.map((step) => `<li data-status="${escapeHtml(step.status)}"><strong>${escapeHtml(step.title)}</strong>: ${escapeHtml(step.detail)}</li>`).join("")}
     </ul>
   `;
 }
@@ -91,14 +159,9 @@ function renderEvidence(evidence = []) {
   if (!evidence.length) return "";
   return `
     <details>
-      <summary>Evidence</summary>
+      <summary>Evidence (${evidence.length})</summary>
       <ul class="evidence-list">
-        ${evidence
-          .map(
-            (item) =>
-              `<li><strong>${escapeHtml(item.label)}</strong> [${escapeHtml(item.resource_type)}${item.resource_uuid ? ` ${escapeHtml(item.resource_uuid)}` : ""}] ${escapeHtml(item.note)}</li>`,
-          )
-          .join("")}
+        ${evidence.map((item) => `<li><strong>${escapeHtml(item.label)}</strong> [${escapeHtml(item.resource_type)}] ${escapeHtml(item.note)}</li>`).join("")}
       </ul>
     </details>
   `;
@@ -118,17 +181,17 @@ function renderPendingAction(pendingAction) {
   if (!pendingAction) return "";
   const destructive = pendingAction.destructive ? "destructive" : "";
   const confirmInput = pendingAction.destructive
-    ? `<input type="text" placeholder="Type DELETE" data-confirm-text="${escapeHtml(pendingAction.id)}" />`
+    ? `<input type="text" placeholder="Type DELETE to confirm" data-confirm-text="${escapeHtml(pendingAction.id)}" />`
     : "";
   return `
     <div class="pending-card ${destructive}">
       <strong>${escapeHtml(pendingAction.action)}</strong>
-      <p class="muted">${escapeHtml(pendingAction.endpoint)}</p>
+      <p class="muted" style="font-size: 0.72rem; margin-top: 4px;">${escapeHtml(pendingAction.endpoint)}</p>
       <pre class="json-block">${escapeHtml(stringify(pendingAction.payload || pendingAction.metadata || {}))}</pre>
       <div class="pending-actions">
         ${confirmInput}
         <button class="${pendingAction.destructive ? "danger" : "secondary"}" data-confirm-action="${escapeHtml(pendingAction.id)}" data-destructive="${String(pendingAction.destructive)}">
-          ${pendingAction.destructive ? "Confirm Delete" : "Confirm Action"}
+          ${pendingAction.destructive ? "⚠ Confirm Delete" : "✓ Confirm Action"}
         </button>
       </div>
     </div>
@@ -148,15 +211,19 @@ function renderAssistantResponse(payload) {
     renderPatientContext();
   }
 
+  const intentBadge = payload.intent && !["inform", "clarify"].includes(payload.intent)
+    ? `<span class="intent-badge">${escapeHtml(payload.intent)}</span>`
+    : "";
+
   appendMessage(
     "assistant",
     `
       <div class="message-head">
-        <strong>MedPilot</strong>
-        <span>${escapeHtml(payload.intent)}</span>
+        <span class="sender">MedPilot</span>
+        ${intentBadge}
       </div>
-      <div>${escapeHtml(payload.message)}</div>
-      ${payload.summary ? `<div class="message-summary">${escapeHtml(payload.summary)}</div>` : ""}
+      <div class="message-body">${renderMarkdown(payload.message)}</div>
+      ${payload.summary ? `<div class="message-summary">${renderMarkdown(payload.summary)}</div>` : ""}
       ${renderWorkflow(payload.workflow)}
       ${renderEvidence(payload.evidence)}
       ${renderData(payload.data)}
@@ -165,17 +232,13 @@ function renderAssistantResponse(payload) {
   );
 }
 
+// ── API calls ─────────────────────────────────────────────────────────
 async function sendChat(prompt, file = null) {
   await ensureSession();
   const formData = new FormData();
   formData.append("prompt", prompt);
   formData.append("session_id", state.sessionId);
-  if (patientUuidEl.value.trim()) {
-    formData.append("patient_uuid", patientUuidEl.value.trim());
-  }
-  if (file) {
-    formData.append("file", file);
-  }
+  if (file) formData.append("file", file);
 
   const response = await fetch("/api/chat", { method: "POST", body: formData });
   const payload = await response.json();
@@ -188,9 +251,7 @@ async function sendChat(prompt, file = null) {
 async function confirmAction(actionId, destructiveConfirmText = "") {
   const formData = new FormData();
   formData.append("action_id", actionId);
-  if (destructiveConfirmText) {
-    formData.append("destructive_confirm_text", destructiveConfirmText);
-  }
+  if (destructiveConfirmText) formData.append("destructive_confirm_text", destructiveConfirmText);
   const response = await fetch("/api/chat/confirm", { method: "POST", body: formData });
   const payload = await response.json();
   if (!response.ok || payload.ok === false) {
@@ -206,15 +267,32 @@ async function refreshLLMStatus() {
     if (!response.ok || payload.ok === false) return;
     const status = payload.data;
     if (!status.enabled || status.provider === "none") {
-      llmBadgeEl.textContent = "Deterministic reasoning active";
+      llmBadgeEl.innerHTML = '<span class="dot" style="background: var(--accent-amber)"></span> LLM Not Configured';
+      llmBadgeEl.style.color = "var(--accent-amber)";
+      llmBadgeEl.style.borderColor = "rgba(245, 158, 11, 0.2)";
+      llmBadgeEl.style.background = "rgba(245, 158, 11, 0.12)";
       return;
     }
-    llmBadgeEl.textContent = `${status.provider}: ${status.model || "configured"}`;
+    llmBadgeEl.innerHTML = `<span class="dot"></span> ${escapeHtml(status.provider)}: ${escapeHtml(status.model || "ready")}`;
   } catch (_error) {
-    llmBadgeEl.textContent = "LLM status unavailable";
+    llmBadgeEl.innerHTML = '<span class="dot" style="background: var(--accent-red)"></span> Offline';
   }
 }
 
+// ── Auto-resize textarea ──────────────────────────────────────────────
+function autoResize() {
+  promptEl.style.height = "auto";
+  promptEl.style.height = Math.min(promptEl.scrollHeight, 160) + "px";
+}
+
+promptEl.addEventListener("input", autoResize);
+
+// ── File input indicator ──────────────────────────────────────────────
+fileInputEl.addEventListener("change", () => {
+  uploadBtn.classList.toggle("has-file", fileInputEl.files.length > 0);
+});
+
+// ── Chat form submit ──────────────────────────────────────────────────
 document.getElementById("chat-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const prompt = promptEl.value.trim();
@@ -224,22 +302,43 @@ document.getElementById("chat-form").addEventListener("submit", async (event) =>
     "user",
     `
       <div class="message-head">
-        <strong>Clinician</strong>
+        <span class="sender">You</span>
       </div>
-      <div>${escapeHtml(prompt)}</div>
+      <div class="message-body">${renderMarkdown(prompt)}</div>
     `,
   );
 
+  promptEl.value = "";
+  autoResize();
+  showTypingIndicator();
+
   try {
     const payload = await sendChat(prompt, fileInputEl.files[0] || null);
+    removeTypingIndicator();
     renderAssistantResponse(payload);
-    promptEl.value = "";
     fileInputEl.value = "";
+    uploadBtn.classList.remove("has-file");
   } catch (error) {
-    appendMessage("assistant", `<div class="message-head"><strong>MedPilot</strong></div><div>${escapeHtml(error.message)}</div>`);
+    removeTypingIndicator();
+    appendMessage(
+      "assistant",
+      `
+        <div class="message-head"><span class="sender">MedPilot</span></div>
+        <div class="message-body" style="color: var(--accent-red);">${escapeHtml(error.message)}</div>
+      `,
+    );
   }
 });
 
+// ── Enter to send, Shift+Enter for newline ────────────────────────────
+promptEl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    document.getElementById("chat-form").requestSubmit();
+  }
+});
+
+// ── Confirm action clicks ─────────────────────────────────────────────
 transcriptEl.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-confirm-action]");
   if (!button) return;
@@ -249,33 +348,41 @@ transcriptEl.addEventListener("click", async (event) => {
   const input = container?.querySelector(`[data-confirm-text="${actionId}"]`);
   const destructiveText = destructive ? input?.value?.trim() || "" : "";
 
+  button.disabled = true;
+  button.textContent = "Processing...";
+
   try {
     const payload = await confirmAction(actionId, destructiveText);
     renderAssistantResponse(payload);
-    button.disabled = true;
   } catch (error) {
-    appendMessage("assistant", `<div class="message-head"><strong>MedPilot</strong></div><div>${escapeHtml(error.message)}</div>`);
+    appendMessage(
+      "assistant",
+      `
+        <div class="message-head"><span class="sender">MedPilot</span></div>
+        <div class="message-body" style="color: var(--accent-red);">${escapeHtml(error.message)}</div>
+      `,
+    );
+    button.disabled = false;
+    button.textContent = destructive ? "⚠ Confirm Delete" : "✓ Confirm Action";
   }
 });
 
-document.querySelectorAll(".chip").forEach((chip) => {
-  chip.addEventListener("click", () => {
-    promptEl.value = chip.dataset.prompt || "";
-    promptEl.focus();
+// ── Quick action & suggestion clicks ──────────────────────────────────
+document.querySelectorAll(".quick-action, .welcome-suggestion").forEach((el) => {
+  el.addEventListener("click", () => {
+    const prompt = el.dataset.prompt;
+    if (prompt) {
+      promptEl.value = prompt;
+      autoResize();
+      promptEl.focus();
+    }
   });
 });
 
-appendMessage(
-  "assistant",
-  `
-    <div class="message-head">
-      <strong>MedPilot</strong>
-      <span>ready</span>
-    </div>
-    <div>Ask for patient search, chart summarization, condition updates, patient intake, or patient switching like “change patient to Maria Santos.” I will keep session memory, reuse the active patient when you say “this patient,” and prepare confirmation-gated workflows for writes.</div>
-  `,
-);
+// ── New chat button ───────────────────────────────────────────────────
+document.getElementById("new-chat-btn").addEventListener("click", newChat);
 
+// ── Init ──────────────────────────────────────────────────────────────
 renderPatientContext();
 refreshLLMStatus();
 (async () => {

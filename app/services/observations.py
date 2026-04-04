@@ -21,13 +21,13 @@ class ObservationService:
     def __init__(self, client: OpenMRSClient):
         self.client = client
 
-    def list_for_patient(self, patient_uuid: str) -> dict:
+    def list_for_patient(self, patient_uuid: str) -> dict[str, Any]:
         return self.client.get("/ws/fhir2/R4/Observation", params={"patient": patient_uuid})
 
-    def get(self, observation_uuid: str) -> dict:
+    def get(self, observation_uuid: str) -> dict[str, Any]:
         return self.client.get(f"/ws/fhir2/R4/Observation/{observation_uuid}")
 
-    def build_fhir_payload(self, payload: ObservationInput) -> dict:
+    def build_fhir_payload(self, payload: ObservationInput) -> dict[str, Any]:
         return {
             "resourceType": "Observation",
             "status": "final",
@@ -37,15 +37,15 @@ class ObservationService:
             "valueQuantity": {"value": payload.value, "unit": payload.unit},
         }
 
-    def create(self, payload: dict) -> dict:
+    def create(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.client.post("/ws/fhir2/R4/Observation", payload)
 
-    def update(self, payload: ObservationUpdateInput) -> dict:
+    def update(self, payload: ObservationUpdateInput) -> dict[str, Any]:
         resource = self.build_fhir_payload(payload)
         resource["id"] = payload.observation_uuid
         return self.client.put(f"/ws/fhir2/R4/Observation/{payload.observation_uuid}", resource)
 
-    def delete(self, observation_uuid: str) -> dict:
+    def delete(self, observation_uuid: str) -> dict[str, Any]:
         return self.client.delete(f"/ws/fhir2/R4/Observation/{observation_uuid}")
 
     def find_latest_by_display(self, patient_uuid: str, display: str) -> dict[str, Any] | None:

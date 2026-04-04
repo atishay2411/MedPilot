@@ -11,10 +11,10 @@ class AllergyService:
         self.client = client
         self.lookups = lookups
 
-    def list_for_patient(self, patient_uuid: str) -> dict:
+    def list_for_patient(self, patient_uuid: str) -> dict[str, Any]:
         return self.client.get("/ws/fhir2/R4/AllergyIntolerance", params={"patient": patient_uuid})
 
-    def list_rest_for_patient(self, patient_uuid: str) -> dict:
+    def list_rest_for_patient(self, patient_uuid: str) -> dict[str, Any]:
         return self.client.get(f"/ws/rest/v1/patient/{patient_uuid}/allergy")
 
     def allergy_exists(self, patient_uuid: str, allergen_name: str) -> bool:
@@ -22,7 +22,7 @@ class AllergyService:
         results = self.list_rest_for_patient(patient_uuid).get("results", [])
         return any(item.get("allergen", {}).get("codedAllergen", {}).get("uuid") == allergen_uuid for item in results)
 
-    def build_rest_payload(self, allergen_name: str, severity: str, reaction: str, comment: str | None) -> dict:
+    def build_rest_payload(self, allergen_name: str, severity: str, reaction: str, comment: str | None) -> dict[str, Any]:
         return {
             "allergen": {
                 "allergenType": "DRUG",
@@ -33,16 +33,16 @@ class AllergyService:
             "comment": comment or f"Patient reports {reaction} to {allergen_name}.",
         }
 
-    def create(self, patient_uuid: str, payload: dict) -> dict:
+    def create(self, patient_uuid: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self.client.post(f"/ws/rest/v1/patient/{patient_uuid}/allergy", payload)
 
-    def patch_severity(self, allergy_uuid: str, severity: str) -> dict:
+    def patch_severity(self, allergy_uuid: str, severity: str) -> dict[str, Any]:
         return self.client.patch(
             f"/ws/fhir2/R4/AllergyIntolerance/{allergy_uuid}",
             [{"op": "replace", "path": "/reaction/0/severity", "value": severity}],
         )
 
-    def delete(self, allergy_uuid: str) -> dict:
+    def delete(self, allergy_uuid: str) -> dict[str, Any]:
         return self.client.delete(f"/ws/fhir2/R4/AllergyIntolerance/{allergy_uuid}")
 
     def find_by_allergen(self, patient_uuid: str, allergen_name: str) -> dict[str, Any] | None:

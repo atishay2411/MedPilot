@@ -1,0 +1,131 @@
+{
+  "id": "a8fc0e47-af33-4979-be69-ac0764046c93",
+  "created_at": "2026-04-04T19:05:12.702065+00:00",
+  "updated_at": "2026-04-04T20:10:16.599881+00:00",
+  "current_patient_uuid": null,
+  "current_patient_display": null,
+  "last_intent": "search_patient",
+  "pending_clarification": null,
+  "recent_turns": [
+    {
+      "role": "user",
+      "content": "Add a patient named sahil rochwani",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "No patients found matching 'Add a patient named sahil rochwani'.",
+      "intent": "search_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Find patient Maria Santos",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "No patients found matching 'Find patient Maria Santos'.",
+      "intent": "search_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "How many pateitns are present",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "There are 0 patients available in the connected OpenMRS search scope.",
+      "intent": "count_patients",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Search all",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "No patients found matching 'Search all'.",
+      "intent": "search_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Add a patient called sahil rochwani to openmrs",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "Please provide the birthdate for patient Sahil Rochwani.",
+      "intent": "clarify",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "24 apr 2000",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Sahil Rochwani, born on 24 apr 2000",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Add a patient Nesh rochwani to openmrs",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Full name is Nesh Rochwani, birthdate is 24 April 2000",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I ran into an issue: I need the patient's full name and birthdate to register them. Could you provide those details?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Find patient Maria Santos",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "No patients found matching 'Find patient Maria Santos'.",
+      "intent": "search_patient",
+      "patient_uuid": null
+    }
+  ]
+}
