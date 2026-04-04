@@ -3,24 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pydantic
+
 from app.core.audit import AuditEvent, AuditLogger
 from app.core.confirmation import ConfirmationRequest, ensure_confirmation
 from app.core.exceptions import ExternalServiceError, ValidationError
 from app.core.security import Actor, ensure_permission
 from app.models.common import (
-    ChatHistoryTurn,
     ChatResponseEnvelope,
-    ChatSessionRecord,
     EntityResult,
     PendingActionRecord,
-    PendingClarificationSlot,
-    PendingWorkflowState,
     WorkflowStep,
 )
 from app.models.domain import EncounterInput, ObservationInput, ObservationUpdateInput, PatientRegistration, PatientUpdateInput
 from app.services.allergies import AllergyService
 from app.services.capabilities import extract_entities, get_capability, handler_map, is_global_intent
-from app.services.chat_sessions import ChatSessionStore
 from app.services.conditions import ConditionService
 from app.services.encounters import EncounterService
 from app.services.ingestion import IngestionService
@@ -39,7 +36,6 @@ class ChatAgentService:
     def __init__(
         self,
         reasoning: LLMReasoningService,
-        sessions: ChatSessionStore,
         pending_store: PendingActionStore,
         audit: AuditLogger,
         patients: PatientService,
@@ -53,7 +49,6 @@ class ChatAgentService:
         population: PopulationService,
     ):
         self.reasoning = reasoning
-        self.sessions = sessions
         self.pending_store = pending_store
         self.audit = audit
         self.patients = patients
@@ -73,36 +68,12 @@ class ChatAgentService:
         prompt: str,
         actor: Actor,
         *,
-        session_id: str | None = None,
         patient_uuid: str | None = None,
         attachment_path: str | None = None,
+        conversation_history: list[dict] | None = None,
     ) -> ChatResponseEnvelope:
-        session = self.sessions.get_or_create(session_id)
-        self.sessions.append_turn(
-            session,
-            ChatHistoryTurn(role="user", content=prompt, patient_uuid=session.current_patient_uuid),
-        )
-
-        effective_patient_uuid = patient_uuid or session.current_patient_uuid
-        has_pending = bool(session.pending_workflow or session.pending_clarification)
-
         # ── Pass 0: deterministic pattern-based classifier ─────────────
-        # Handles common queries (help, count, list-all, create patient,
-        # search, view clinical data) without requiring the LLM at all.
-        # This ensures reliable operation with small models like llama3.2.
-        det_decision = try_deterministic_classify(
-            prompt,
-            pending_intent=(
-                session.pending_clarification.intent
-                if session.pending_clarification
-                else None
-            ),
-            collected_entities=(
-                session.pending_clarification.collected_entities
-                if session.pending_clarification
-                else None
-            ),
-        )
+        det_decision = try_deterministic_classify(prompt)
 
         if det_decision is not None:
             decision = det_decision
@@ -110,25 +81,19 @@ class ChatAgentService:
             # ── Pass 1: primary LLM decision ──────────────────────────────
             decision = self.reasoning.generate_conversational_response(
                 prompt,
-                session_state=session.snapshot(),
+                session_state=None,
                 has_file=bool(attachment_path),
+                conversation_history=conversation_history,
             )
 
-            # ── Pass 2 (conditional): run fallback only when intent is missing/unsupported ──
+            # ── Pass 2 (conditional): fallback when intent is missing/unsupported ──
             if decision.mode != "inform" and not self._is_supported_intent(decision.intent):
                 decision = self.reasoning.run_fallback_decision(
                     prompt,
                     decision,
-                    session_state=session.snapshot(),
+                    session_state=None,
                     has_file=bool(attachment_path),
-                )
-
-            # ── Clarification resolution (when a slot is in-flight) ───────
-            if has_pending and det_decision is None:
-                decision = self.reasoning.resolve_clarification_answer(
-                    prompt,
-                    decision,
-                    session_state=session.snapshot(),
+                    conversation_history=conversation_history,
                 )
 
             # Sanitize LLM response to strip leaked prompt context
@@ -141,35 +106,7 @@ class ChatAgentService:
                     update={"clarifying_question": sanitize_response_message(decision.clarifying_question)}
                 )
 
-        # ── Scope-based stale context clearance ───────────────────────
-        # If the user started a fresh global query (not a follow-up) and
-        # no pending slot is in-flight, clear any carry-over state so
-        # earlier bad turns don't bias this new request.
         is_global = decision.scope == "global" or is_global_intent(decision.intent or "")
-        if is_global and not has_pending and decision.mode == "action":
-            self.sessions.clear_stale_context(session)
-
-        # ── Deterministic entity pre-merge from pending clarification slot ────
-        # After all passes, merge any already-collected slot entities into
-        # the decision entities so the handler always sees the full picture,
-        # even when the LLM drops previously-extracted fields during slot-fill.
-        if session.pending_clarification and decision.entities is not None:
-            slot_entities = session.pending_clarification.collected_entities or {}
-            if slot_entities and (decision.intent == session.pending_clarification.intent):
-                # New values take priority; slot values fill gaps
-                merged = {**slot_entities, **{k: v for k, v in decision.entities.items() if v not in (None, "", [], {})}}
-                decision = decision.model_copy(update={"entities": merged})
-
-                # ── Force mode=action when all required fields are satisfied ──
-                if decision.mode == "clarify" and decision.intent:
-                    capability = get_capability(decision.intent)
-                    if capability:
-                        required_fields = {f.name for f in capability.fields if f.required}
-                        if required_fields and all(
-                            merged.get(f) not in (None, "", [], {})
-                            for f in required_fields
-                        ):
-                            decision = decision.model_copy(update={"mode": "action", "missing_fields": []})
 
         workflow: list[WorkflowStep] = [
             WorkflowStep(
@@ -181,47 +118,32 @@ class ChatAgentService:
 
         # ── CLARIFY: assistant needs more info ─────────────────────────
         if decision.mode == "clarify":
-            response = self._handle_clarify(decision, session, workflow)
-            response.session_id = session.id
+            response = self._handle_clarify(decision, workflow)
             response.scope = decision.scope
-            self._update_session_after_response(
-                session, response, decision.intent or "clarify",
-                clarification_slot=self._build_clarification_slot(prompt, session, decision),
-                pending_workflow=self._build_pending_workflow_state(prompt, session, decision),
-                is_global=is_global,
-            )
-            self._log(actor, decision.intent or "clarify", effective_patient_uuid, prompt, "clarify")
+            self._log(actor, decision.intent or "clarify", patient_uuid, prompt, "clarify")
             return response
 
         # ── INFORM: pure information, no system action ─────────────────
         if decision.mode == "inform":
-            response = self._handle_inform(decision, session, workflow)
-            response.session_id = session.id
+            response = self._handle_inform(decision, workflow)
             response.scope = "global" if is_global else "patient"
-            self._update_session_after_response(session, response, "inform", pending_workflow=None, is_global=True)
-            self._log(actor, "inform", effective_patient_uuid, prompt, "inform")
+            self._log(actor, "inform", patient_uuid, prompt, "inform")
             return response
 
         # ── ACTION: dispatch to the appropriate domain handler ─────────
         intent = decision.intent or "inform"
         capability = get_capability(intent)
         if not capability:
-            # Unknown intent from LLM — treat as inform
             response = ChatResponseEnvelope(
-                session_id=session.id,
                 intent="inform",
                 message=decision.response_message or f"I received an unsupported intent '{intent}'. Could you rephrase?",
                 workflow=workflow,
                 scope="global",
             )
-            self._update_session_after_response(session, response, "inform", pending_workflow=None, is_global=True)
             return response
 
-        # Narrow entities to only the fields this capability knows about
         entities = extract_entities(decision.entities or {}, capability)
-
-        # For global-scoped capabilities, do not inherit the active patient uuid
-        resolved_patient_uuid = None if is_global_intent(intent) else effective_patient_uuid
+        resolved_patient_uuid = None if is_global_intent(intent) else patient_uuid
 
         handler_name = self._HANDLER_MAP.get(intent)
         handler = getattr(self, handler_name)
@@ -233,52 +155,37 @@ class ChatAgentService:
                 workflow,
                 patient_uuid=resolved_patient_uuid,
                 attachment_path=attachment_path,
-                session=session,
+                session=None,
                 llm_message=decision.response_message,
             )
-        except ValidationError as exc:
-            error_msg = str(exc)
-            response = ChatResponseEnvelope(
-                session_id=session.id,
+        except (ValidationError, pydantic.ValidationError) as exc:
+            self._log(actor, intent, patient_uuid, prompt, "error:validation")
+            return ChatResponseEnvelope(
                 intent=intent,
-                message=f"I ran into an issue: {error_msg}",
+                message=f"I ran into an issue processing the request data: {exc}",
                 workflow=workflow,
             )
-            self._update_session_after_response(session, response, intent, pending_workflow=None, is_global=is_global)
-            self._log(actor, intent, effective_patient_uuid, prompt, "error:validation")
-            return response
         except ExternalServiceError as exc:
             workflow.append(WorkflowStep(status="blocked", title="OpenMRS unreachable", detail=str(exc)))
-            response = ChatResponseEnvelope(
-                session_id=session.id,
+            self._log(actor, intent, patient_uuid, prompt, "error:ExternalServiceError")
+            return ChatResponseEnvelope(
                 intent=intent,
                 message="The OpenMRS server returned an error while processing your request. Please try again.",
                 workflow=workflow,
             )
-            self._update_session_after_response(session, response, intent, pending_workflow=None, is_global=is_global)
-            self._log(actor, intent, effective_patient_uuid, prompt, f"error:ExternalServiceError")
-            return response
         except Exception as exc:
             workflow.append(WorkflowStep(status="blocked", title="Execution failed", detail=f"{type(exc).__name__}: unexpected error."))
-            response = ChatResponseEnvelope(
-                session_id=session.id,
+            self._log(actor, intent, patient_uuid, prompt, f"error:{type(exc).__name__}")
+            return ChatResponseEnvelope(
                 intent=intent,
                 message="I ran into an unexpected application error while trying to complete that request.",
                 workflow=workflow,
             )
-            self._update_session_after_response(session, response, intent, pending_workflow=None, is_global=is_global)
-            self._log(actor, intent, effective_patient_uuid, prompt, f"error:{type(exc).__name__}")
-            return response
 
-        response.session_id = session.id
         response.scope = decision.scope
-        self._update_session_after_response(
-            session, response, intent, pending_workflow=None,
-            is_global=is_global,
-        )
         self._log(
             actor, intent,
-            response.patient_context.get("uuid") if response.patient_context else effective_patient_uuid,
+            response.patient_context.get("uuid") if response.patient_context else patient_uuid,
             prompt,
             "preview" if response.pending_action else "completed",
         )
@@ -289,7 +196,6 @@ class ChatAgentService:
         record = self.pending_store.consume(action_id)
         ensure_permission(actor, record.permission)
         ensure_confirmation(ConfirmationRequest(confirmed=True, destructive_confirm_text=destructive_confirm_text), destructive=record.destructive)
-        session = self.sessions.get(record.session_id) if record.session_id else None
 
         workflow = [
             WorkflowStep(status="completed", title="Pending action loaded", detail=record.action),
@@ -351,8 +257,6 @@ class ChatAgentService:
             )
         elif record.intent == "delete_patient":
             result = self.patients.delete(record.patient_uuid or record.payload["patient_uuid"], purge=bool(record.metadata.get("purge")))
-            if session and session.current_patient_uuid == record.patient_uuid:
-                response_patient_context = {"uuid": None, "display": None}
         elif record.intent == "update_patient":
             result = self.patients.update(record.patient_uuid or record.payload.get("patient_uuid", ""), record.payload)
             response_patient_context = {
@@ -370,17 +274,13 @@ class ChatAgentService:
 
         workflow.append(WorkflowStep(status="completed", title="Workflow executed", detail=record.endpoint))
         self._log(actor, record.intent, record.patient_uuid, record.prompt, "executed")
-        response = ChatResponseEnvelope(
-            session_id=record.session_id,
+        return ChatResponseEnvelope(
             intent=record.intent,
             message=f"✅ {record.action} completed successfully.",
             workflow=workflow,
             patient_context=response_patient_context,
             data=result,
         )
-        if session:
-            self._update_session_after_response(session, response, record.intent, pending_workflow=None)
-        return response
 
     # ── Helpers ────────────────────────────────────────────────────────
 
@@ -389,9 +289,9 @@ class ChatAgentService:
         entities: dict[str, Any],
         explicit_patient_uuid: str | None,
         workflow: list[WorkflowStep],
-        session: ChatSessionRecord | None = None,
+        session: Any = None,
     ) -> dict[str, Any]:
-        fallback_patient_uuid = explicit_patient_uuid or (session.current_patient_uuid if session else None)
+        fallback_patient_uuid = explicit_patient_uuid
         patient = self.patients.resolve_patient(entities.get("patient_query"), fallback_patient_uuid)
         workflow.append(WorkflowStep(status="completed", title="Patient resolved", detail=f"{patient['display']} ({patient['uuid']})"))
         context = {"uuid": patient["uuid"], "display": patient["display"], "alternatives": patient["alternatives"]}
@@ -422,52 +322,6 @@ class ChatAgentService:
         return bool(intent and get_capability(intent))
 
     @staticmethod
-    def _build_pending_workflow_state(
-        prompt: str,
-        session: ChatSessionRecord,
-        decision: ConversationalDecision,
-    ) -> PendingWorkflowState | None:
-        if decision.mode != "clarify":
-            return None
-        return PendingWorkflowState(
-            intent=decision.intent,
-            original_prompt=prompt,
-            collected_entities=decision.entities or {},
-            missing_fields=list(decision.missing_fields or []),
-            clarifying_question=decision.clarifying_question or decision.response_message,
-            patient_uuid=session.current_patient_uuid,
-            patient_display=session.current_patient_display,
-        )
-
-    @staticmethod
-    def _build_clarification_slot(
-        prompt: str,
-        session: ChatSessionRecord,
-        decision: ConversationalDecision,
-    ) -> PendingClarificationSlot | None:
-        """Build a structured clarification slot from a clarify-mode decision.
-
-        Returns None when the decision is not in clarify mode.
-        The turn_count increments from the existing slot so we can cap loops.
-        """
-        if decision.mode != "clarify":
-            return None
-        existing_turn = (
-            session.pending_clarification.turn_count
-            if session.pending_clarification
-            else 0
-        )
-        return PendingClarificationSlot(
-            question=decision.clarifying_question or decision.response_message,
-            intent=decision.intent,
-            collected_entities=decision.entities or {},
-            missing_fields=list(decision.missing_fields or []),
-            patient_uuid=session.current_patient_uuid,
-            patient_display=session.current_patient_display,
-            turn_count=existing_turn + 1,
-        )
-
-    @staticmethod
     def _build_encounter_input(patient_uuid: str, entities: dict[str, Any]) -> EncounterInput:
         return EncounterInput(
             patient_uuid=patient_uuid,
@@ -478,7 +332,7 @@ class ChatAgentService:
             encounter_datetime=now_iso(),
         )
 
-    def _handle_clarify(self, decision: ConversationalDecision, session: ChatSessionRecord, workflow: list[WorkflowStep]) -> ChatResponseEnvelope:
+    def _handle_clarify(self, decision: ConversationalDecision, workflow: list[WorkflowStep]) -> ChatResponseEnvelope:
         """Return a clarifying question to the user without executing any action."""
         workflow.append(WorkflowStep(
             status="planned",
@@ -486,14 +340,12 @@ class ChatAgentService:
             detail="The assistant needs more information before proceeding.",
         ))
         return ChatResponseEnvelope(
-            session_id=session.id,
             intent="clarify",
             message=decision.clarifying_question or decision.response_message,
             workflow=workflow,
-            patient_context={"uuid": session.current_patient_uuid, "display": session.current_patient_display} if session.current_patient_uuid else None,
         )
 
-    def _handle_inform(self, decision: ConversationalDecision, session: ChatSessionRecord, workflow: list[WorkflowStep]) -> ChatResponseEnvelope:
+    def _handle_inform(self, decision: ConversationalDecision, workflow: list[WorkflowStep]) -> ChatResponseEnvelope:
         """Return an informational response (no action taken)."""
         workflow.append(WorkflowStep(
             status="completed",
@@ -501,26 +353,20 @@ class ChatAgentService:
             detail="No system action required.",
         ))
         return ChatResponseEnvelope(
-            session_id=session.id,
             intent="inform",
             message=decision.response_message,
             workflow=workflow,
-            patient_context={"uuid": session.current_patient_uuid, "display": session.current_patient_display} if session.current_patient_uuid else None,
         )
 
     # ── Domain handlers ───────────────────────────────────────────────
 
-    def _handle_switch_patient(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, session: ChatSessionRecord, **_: Any) -> ChatResponseEnvelope:
+    def _handle_switch_patient(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "read:patient")
         patient = self.patients.resolve_patient(entities.get("patient_query"), None)
-        workflow.append(WorkflowStep(status="completed", title="Patient switched", detail=f"Active patient set to {patient['display']}."))
-        # switch_patient is the only intent that intentionally mutates the active
-        # session patient; the update is applied via _update_session_after_response
-        # because we explicitly pass patient_context with the new UUID.
+        workflow.append(WorkflowStep(status="completed", title="Patient resolved", detail=f"Loaded chart for {patient['display']}."))
         return ChatResponseEnvelope(
-            session_id=session.id,
             intent="switch_patient",
-            message=f"Switched active patient to **{patient['display']}**. Future queries will refer to this patient.",
+            message=f"Loaded chart for **{patient['display']}**.",
             workflow=workflow,
             patient_context={"uuid": patient["uuid"], "display": patient["display"], "alternatives": patient["alternatives"]},
             data={"alternatives": patient["alternatives"]},
@@ -598,13 +444,9 @@ class ChatAgentService:
             if str(item.get("display", "")).strip()
         ]
         total = len(displays)
-        shown = displays[:10]
-        names = ", ".join(shown)
-        extra = total - len(shown)
-        suffix = f", and {extra} more" if extra else ""
+        names = "\n".join(f"- {d}" for d in displays)
         return (
-            f"There {'is' if total == 1 else 'are'} **{total}** patient{'s' if total != 1 else ''} "
-            f"registered in OpenMRS: {names}{suffix}."
+            f"There {'is' if total == 1 else 'are'} **{total}** patient{'s' if total != 1 else ''} registered in OpenMRS:\n\n{names}"
         )
 
     @staticmethod
@@ -612,20 +454,17 @@ class ChatAgentService:
         if not results:
             return f"No patients found matching '{query}'."
         displays = [str(item.get("display", "Unknown")).strip() for item in results if str(item.get("display", "")).strip()]
-        shown = displays[:5]
-        names = ", ".join(shown)
-        extra = max(0, len(displays) - len(shown))
-        suffix = f", and {extra} more" if extra else ""
         if len(results) == 1:
-            return f"Found 1 match: **{shown[0]}**."
+            return f"Found 1 match: **{displays[0]}**."
         mode_desc = ""
         if search_mode == "starts_with":
             mode_desc = f" whose names start with '{query}'"
         elif search_mode == "contains":
             mode_desc = f" whose names contain '{query}'"
-        return f"Found {len(results)} patients{mode_desc}: {names}{suffix}."
+        names = "\n".join(f"- {d}" for d in displays)
+        return f"Found {len(results)} patients{mode_desc}:\n\n{names}"
 
-    def _handle_patient_analysis(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_patient_analysis(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "read:clinical")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         brief = self.summaries.summarize_patient(context["uuid"])
@@ -641,7 +480,7 @@ class ChatAgentService:
             evidence=brief["evidence"],
         )
 
-    def _handle_get_observations(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_get_observations(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "read:clinical")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         display = entities.get("observation_display")
@@ -662,28 +501,28 @@ class ChatAgentService:
         workflow.append(WorkflowStep(status="completed", title="Observations fetched", detail="Full observation history returned."))
         return ChatResponseEnvelope(intent="get_observations", message=f"Observations for **{context['display']}**:", workflow=workflow, patient_context=context, data=data)
 
-    def _handle_get_conditions(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_get_conditions(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "read:clinical")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         data = self.conditions.list_for_patient(context["uuid"])
         workflow.append(WorkflowStep(status="completed", title="Conditions fetched", detail="Problem list returned."))
         return ChatResponseEnvelope(intent="get_conditions", message=f"Conditions for **{context['display']}**:", workflow=workflow, patient_context=context, data=data)
 
-    def _handle_get_allergies(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_get_allergies(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "read:clinical")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         data = self.allergies.list_for_patient(context["uuid"])
         workflow.append(WorkflowStep(status="completed", title="Allergies fetched", detail="Allergy list returned."))
         return ChatResponseEnvelope(intent="get_allergies", message=f"Allergies for **{context['display']}**:", workflow=workflow, patient_context=context, data=data)
 
-    def _handle_get_medications(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_get_medications(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "read:clinical")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         data = self.medications.list_for_patient(context["uuid"])
         workflow.append(WorkflowStep(status="completed", title="Medications fetched", detail="Medication list returned."))
         return ChatResponseEnvelope(intent="get_medications", message=f"Medications for **{context['display']}**:", workflow=workflow, patient_context=context, data=data)
 
-    def _handle_get_medication_dispense(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_get_medication_dispense(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "read:clinical")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         data = self.medications.medication_dispense(context["uuid"])
@@ -694,10 +533,17 @@ class ChatAgentService:
         ensure_permission(actor, "write:patient")
         if not all([entities.get("given_name"), entities.get("family_name"), entities.get("birthdate")]):
             raise ValidationError("I need the patient's full name and birthdate to register them. Could you provide those details?")
-        registration = PatientRegistration(**{k: v for k, v in entities.items() if k in PatientRegistration.model_fields})
+        registration = PatientRegistration(
+            given_name=entities["given_name"],
+            family_name=entities["family_name"],
+            gender=entities.get("gender") or "U",
+            birthdate=entities["birthdate"],
+            address1=entities.get("address1"),
+            city_village=entities.get("city_village"),
+            country=entities.get("country"),
+        )
         payload = self.patients.build_create_payload(registration)
         duplicates = self.patients.find_duplicate_candidates(registration)
-        session = _.get("session")
         pending = self.pending_store.create(
             action_kind="write",
             intent="create_patient",
@@ -706,7 +552,6 @@ class ChatAgentService:
             endpoint="POST /ws/rest/v1/patient",
             payload=payload,
             prompt=prompt,
-            session_id=session.id if session else None,
             metadata={"duplicate_warnings": duplicates},
         )
         return self._preview_response(
@@ -718,7 +563,7 @@ class ChatAgentService:
             summary=f"Patient: {registration.given_name} {registration.family_name}, DOB {registration.birthdate}, gender {registration.gender}.",
         )
 
-    def _handle_delete_patient(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_delete_patient(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "delete:patient")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         purge = bool(entities.get("purge"))
@@ -733,7 +578,7 @@ class ChatAgentService:
             patient_uuid=context["uuid"],
             destructive=True,
             prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
             metadata={"purge": purge, "patient_display": context["display"]},
         )
         summary = "Hard purge requested." if purge else "Standard OpenMRS delete/void requested."
@@ -746,7 +591,7 @@ class ChatAgentService:
             summary=summary,
         )
 
-    def _handle_update_patient(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_update_patient(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:patient")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         update = PatientUpdateInput(
@@ -780,7 +625,7 @@ class ChatAgentService:
             payload=payload,
             patient_uuid=context["uuid"],
             prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
             metadata={"patient_display": context["display"]},
         )
         summary = "; ".join(changed) if changed else "Demographics update."
@@ -866,7 +711,7 @@ class ChatAgentService:
             endpoint="POST /patient + multi-entity clinical writes",
             payload={"patient_payload": patient_payload},
             prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
             metadata={
                 "registration": registration.model_dump(),
                 "duplicate_warnings": duplicates,
@@ -891,7 +736,7 @@ class ChatAgentService:
             summary=summary,
         )
 
-    def _handle_create_encounter(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_create_encounter(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:encounter")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         payload = self.encounters.build_rest_payload(self._build_encounter_input(context["uuid"], entities))
@@ -899,7 +744,7 @@ class ChatAgentService:
             action_kind="write", intent="create_encounter", action="Create Encounter",
             permission="write:encounter", endpoint="POST /ws/rest/v1/encounter",
             payload=payload, patient_uuid=context["uuid"], prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
         )
         return self._preview_response(
             intent="create_encounter",
@@ -908,7 +753,7 @@ class ChatAgentService:
             summary=f"Encounter at {entities.get('location_name', 'Outpatient Clinic')}.",
         )
 
-    def _handle_create_observation(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_create_observation(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:observation")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         observations = [
@@ -928,7 +773,7 @@ class ChatAgentService:
             action="Create Observation" if len(observations) == 1 else "Create Observation Batch",
             permission="write:observation", endpoint="POST /ws/fhir2/R4/Observation",
             payload={"observations": observations}, patient_uuid=context["uuid"],
-            prompt=prompt, session_id=session.id if session else None,
+            prompt=prompt, session_id=None,
         )
         summary = "; ".join(f"**{item['display']}**: {item['value']} {item['unit']}" for item in observations)
         return self._preview_response(
@@ -937,7 +782,7 @@ class ChatAgentService:
             workflow=workflow, pending=pending, patient_context=context, summary=summary,
         )
 
-    def _handle_update_observation(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_update_observation(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:observation")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         observations = entities.get("observations", [])
@@ -956,7 +801,7 @@ class ChatAgentService:
             action_kind="write", intent="update_observation", action="Update Observation",
             permission="write:observation", endpoint=f"PUT /ws/fhir2/R4/Observation/{current['id']}",
             payload=payload, patient_uuid=context["uuid"], prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
         )
         return self._preview_response(
             intent="update_observation",
@@ -965,7 +810,7 @@ class ChatAgentService:
             summary=f"{target['display']} → {target['value']} {target['unit']}.",
         )
 
-    def _handle_delete_observation(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_delete_observation(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "delete:observation")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         display = entities.get("observation_display")
@@ -979,7 +824,7 @@ class ChatAgentService:
             permission="delete:observation", endpoint=f"DELETE /ws/fhir2/R4/Observation/{current['id']}",
             payload={"observation_uuid": current["id"], "pre_delete_resource": current},
             patient_uuid=context["uuid"], destructive=True, prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
         )
         return self._preview_response(
             intent="delete_observation",
@@ -987,7 +832,7 @@ class ChatAgentService:
             workflow=workflow, pending=pending, patient_context=context,
         )
 
-    def _handle_create_condition(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_create_condition(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:condition")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         payload = self.conditions.build_create_payload(
@@ -1001,7 +846,7 @@ class ChatAgentService:
             action_kind="write", intent="create_condition", action="Create Condition",
             permission="write:condition", endpoint="POST /ws/rest/v1/condition",
             payload=payload, patient_uuid=context["uuid"], prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
         )
         return self._preview_response(
             intent="create_condition",
@@ -1010,7 +855,7 @@ class ChatAgentService:
             summary=f"{entities.get('condition_name')} — status: {entities.get('clinical_status', 'active')}.",
         )
 
-    def _handle_update_condition(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_update_condition(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:condition")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         condition = self.conditions.find_by_name(context["uuid"], entities.get("condition_name", ""))
@@ -1021,7 +866,7 @@ class ChatAgentService:
             permission="write:condition", endpoint=f"PATCH /ws/fhir2/R4/Condition/{condition['id']}",
             payload={"condition_uuid": condition["id"], "status": entities.get("status", "inactive")},
             patient_uuid=context["uuid"], prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
         )
         return self._preview_response(
             intent="update_condition",
@@ -1030,7 +875,7 @@ class ChatAgentService:
             summary=f"Status → {entities.get('status', 'inactive')}.",
         )
 
-    def _handle_delete_condition(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_delete_condition(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "delete:condition")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         condition = self.conditions.find_by_name(context["uuid"], entities.get("name", ""))
@@ -1041,7 +886,7 @@ class ChatAgentService:
             permission="delete:condition", endpoint=f"DELETE /ws/fhir2/R4/Condition/{condition['id']}",
             payload={"condition_uuid": condition["id"], "pre_delete_resource": condition},
             patient_uuid=context["uuid"], destructive=True, prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
         )
         return self._preview_response(
             intent="delete_condition",
@@ -1049,7 +894,7 @@ class ChatAgentService:
             workflow=workflow, pending=pending, patient_context=context,
         )
 
-    def _handle_create_allergy(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_create_allergy(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:allergy")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         payload = self.allergies.build_rest_payload(
@@ -1060,7 +905,7 @@ class ChatAgentService:
             action_kind="write", intent="create_allergy", action="Create Allergy",
             permission="write:allergy", endpoint=f"POST /ws/rest/v1/patient/{context['uuid']}/allergy",
             payload=payload, patient_uuid=context["uuid"], prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
         )
         return self._preview_response(
             intent="create_allergy",
@@ -1068,7 +913,7 @@ class ChatAgentService:
             workflow=workflow, pending=pending, patient_context=context,
         )
 
-    def _handle_update_allergy(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_update_allergy(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:allergy")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         allergy = self.allergies.find_by_allergen(context["uuid"], entities.get("allergen_name", ""))
@@ -1079,7 +924,7 @@ class ChatAgentService:
             permission="write:allergy", endpoint=f"PATCH /ws/fhir2/R4/AllergyIntolerance/{allergy['id']}",
             payload={"allergy_uuid": allergy["id"], "severity": entities.get("severity", "moderate")},
             patient_uuid=context["uuid"], prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
         )
         return self._preview_response(
             intent="update_allergy",
@@ -1087,7 +932,7 @@ class ChatAgentService:
             workflow=workflow, pending=pending, patient_context=context,
         )
 
-    def _handle_delete_allergy(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_delete_allergy(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "delete:allergy")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         allergy = self.allergies.find_by_allergen(context["uuid"], entities.get("name", ""))
@@ -1098,7 +943,7 @@ class ChatAgentService:
             permission="delete:allergy", endpoint=f"DELETE /ws/fhir2/R4/AllergyIntolerance/{allergy['id']}",
             payload={"allergy_uuid": allergy["id"], "pre_delete_resource": allergy},
             patient_uuid=context["uuid"], destructive=True, prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
         )
         return self._preview_response(
             intent="delete_allergy",
@@ -1106,7 +951,7 @@ class ChatAgentService:
             workflow=workflow, pending=pending, patient_context=context,
         )
 
-    def _handle_create_medication(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_create_medication(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:medication")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         required = ["drug_name", "dose", "dose_units_name", "route_name", "frequency_name", "duration", "duration_units_name", "quantity", "quantity_units_name"]
@@ -1118,7 +963,7 @@ class ChatAgentService:
             action_kind="workflow", intent="create_medication", action="Create Medication Order",
             permission="write:medication", endpoint="Create encounter + POST /ws/rest/v1/order",
             payload=medication_payload, patient_uuid=context["uuid"], prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
             metadata={"encounter_payload": encounter_payload},
         )
         summary = f"**{entities['drug_name']}** {entities['dose']} {entities['dose_units_name']} {entities['route_name']} {entities['frequency_name']} for {entities['duration']} {entities['duration_units_name']}."
@@ -1128,7 +973,7 @@ class ChatAgentService:
             workflow=workflow, pending=pending, patient_context=context, summary=summary,
         )
 
-    def _handle_create_medication_dispense(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_create_medication_dispense(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:medication")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         if not entities.get("drug_name") or not entities.get("quantity"):
@@ -1144,7 +989,7 @@ class ChatAgentService:
                 "dosage_text": entities.get("dosage_text", f"Dispensed {entities['quantity']} {entities.get('unit', 'tablet')}(s) of {entities['drug_name']}."),
             },
             patient_uuid=context["uuid"], prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
         )
         return self._preview_response(
             intent="create_medication_dispense",
@@ -1152,7 +997,7 @@ class ChatAgentService:
             workflow=workflow, pending=pending, patient_context=context,
         )
 
-    def _handle_update_medication(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_update_medication(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:medication")
         context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
         medication = self.medications.find_by_name(context["uuid"], entities.get("drug_name", ""))
@@ -1163,7 +1008,7 @@ class ChatAgentService:
             permission="write:medication", endpoint=f"PATCH /ws/fhir2/R4/MedicationRequest/{medication['id']}",
             payload={"medication_uuid": medication["id"], "status": entities.get("status", "stopped")},
             patient_uuid=context["uuid"], prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
         )
         return self._preview_response(
             intent="update_medication",
@@ -1171,7 +1016,7 @@ class ChatAgentService:
             workflow=workflow, pending=pending, patient_context=context,
         )
 
-    def _handle_ingest_pdf(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, attachment_path: str | None = None, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_ingest_pdf(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, attachment_path: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:ingestion")
         if not attachment_path:
             raise ValidationError("PDF ingestion requires an attached PDF file.")
@@ -1182,7 +1027,7 @@ class ChatAgentService:
             action_kind="workflow", intent="ingest_pdf", action="Ingest Patient PDF",
             permission="write:ingestion", endpoint="MULTI-STEP PDF INGESTION",
             payload=parsed.model_dump(), patient_uuid=context["uuid"], prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
             metadata={"file_path": attachment_path},
         )
         summary = f"Conditions: {len(parsed.conditions)}, allergies: {len(parsed.allergies)}, medications: {len(parsed.medications)}, observations: {len(parsed.observations)}."
@@ -1193,7 +1038,7 @@ class ChatAgentService:
             data=parsed.model_dump(), summary=summary,
         )
 
-    def _handle_sync_health_gorilla(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, session: ChatSessionRecord | None = None, **_: Any) -> ChatResponseEnvelope:
+    def _handle_sync_health_gorilla(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, session: Any = None, **_: Any) -> ChatResponseEnvelope:
         ensure_permission(actor, "write:ingestion")
         if not all([entities.get("given_name"), entities.get("family_name"), entities.get("birthdate")]):
             raise ValidationError("Health Gorilla sync requires first name, last name, and birthdate.")
@@ -1205,7 +1050,7 @@ class ChatAgentService:
             action_kind="workflow", intent="sync_health_gorilla", action="Sync Health Gorilla Patient",
             permission="write:ingestion", endpoint="Health Gorilla Patient + Condition Import",
             payload={"condition_count": len(preview["conditions"])}, prompt=prompt,
-            session_id=session.id if session else None,
+            session_id=None,
             metadata={"match_resource": match_resource, "conditions": preview["conditions"]},
         )
         workflow.append(WorkflowStep(status="completed", title="External chart previewed", detail=f"{len(preview['conditions'])} condition(s) prepared."))
@@ -1328,53 +1173,6 @@ class ChatAgentService:
         if payloads:
             return [self.observations.create(self.observations.build_fhir_payload(ObservationInput.model_validate(payload))) for payload in payloads]
         return self.observations.update(ObservationUpdateInput.model_validate(record.payload))
-
-    def _update_session_after_response(
-        self,
-        session: ChatSessionRecord,
-        response: ChatResponseEnvelope,
-        intent: str,
-        *,
-        clarification_slot: PendingClarificationSlot | None = None,
-        pending_workflow: PendingWorkflowState | None = None,
-        is_global: bool = False,
-    ) -> None:
-        # Patient-context update policy:
-        # 1. Global queries (is_global=True) → NEVER update the active patient.
-        #    A count_patients or search_patient listing must not silently
-        #    overwrite who the clinician is currently looking at.
-        # 2. switch_patient / create_patient / patient_intake → Always update
-        #    (these intents exist specifically to change the active patient).
-        # 3. All other patient-scoped handlers → Update only when the session
-        #    had NO prior active patient (first-use auto-set after the first
-        #    chart query). If a patient was already active, the UUID is the
-        #    same so no write is needed.
-        _patient_switching_intents = {"switch_patient", "create_patient", "patient_intake"}
-
-        if not is_global and response.patient_context:
-            new_uuid = response.patient_context.get("uuid")
-            new_display = response.patient_context.get("display")
-            if intent in _patient_switching_intents:
-                self.sessions.set_current_patient(session, new_uuid, new_display)
-            elif not session.current_patient_uuid and new_uuid:
-                # First chart interaction — auto-set the patient for follow-ups
-                self.sessions.set_current_patient(session, new_uuid, new_display)
-        # Always persist last intent and slot state
-        self.sessions.set_last_intent(session, intent)
-        self.sessions.set_pending_clarification(session, clarification_slot)
-        self.sessions.set_pending_workflow(session, pending_workflow)
-        self.sessions.append_turn(
-            session,
-            ChatHistoryTurn(
-                role="assistant",
-                content=response.summary or response.message,
-                intent=intent,
-                patient_uuid=response.patient_context.get("uuid") if response.patient_context else session.current_patient_uuid,
-            ),
-        )
-        refreshed = self.sessions.get(session.id)
-        response.session_id = refreshed.id
-        response.session_state = refreshed.snapshot()
 
     def _log(self, actor: Actor, intent: str, patient_uuid: str | None, prompt: str | None, outcome: str) -> None:
         self.audit.log(

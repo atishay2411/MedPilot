@@ -1,0 +1,3 @@
+
+[notice] A new release of pip is available: 23.2.1 -> 26.0.1
+[notice] To update, run: /Users/atishayjain/Desktop/Hackathon/scarlethacks26/.venv/bin/python3 -m pip install --upgrade pip

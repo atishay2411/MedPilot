@@ -10,6 +10,14 @@ from app.llm.models import LLMGenerationResult
 
 
 class OpenAIProvider(LLMProvider):
+    """OpenAI-compatible provider using the standard Chat Completions API.
+
+    Works with any OpenAI-compatible endpoint (openai, Azure OpenAI, local
+    vLLM / LMStudio, etc.).  Uses ``json_schema`` structured output when
+    the model supports it (gpt-4o, gpt-4o-mini, gpt-4.1-*), falling back
+    to ``json_object`` mode for older models.
+    """
+
     provider_name = "openai"
 
     def __init__(self, settings: Settings):
@@ -23,73 +31,114 @@ class OpenAIProvider(LLMProvider):
     def generate_text(self, *, system_prompt: str, user_prompt: str) -> LLMGenerationResult:
         self._ensure_enabled()
         try:
-            response = self.client.responses.create(
+            response = self.client.chat.completions.create(
                 model=self.settings.medpilot_llm_model,
-                instructions=system_prompt,
-                input=[{"role": "user", "content": [{"type": "input_text", "text": user_prompt}]}],
-                reasoning={"effort": self.settings.medpilot_llm_reasoning_effort},
-                max_output_tokens=self.settings.medpilot_llm_max_output_tokens,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=self.settings.medpilot_llm_max_output_tokens,
+                temperature=0,
             )
-        except Exception as exc:  # pragma: no cover - network/provider behavior
+        except Exception as exc:
             raise LLMProviderError(f"OpenAI request failed: {exc}") from exc
-        text = self._extract_text(response.model_dump())
-        return LLMGenerationResult(provider=self.provider_name, model=self.settings.medpilot_llm_model or "", text=text, raw=response.model_dump())
 
-    def generate_structured(self, *, system_prompt: str, user_prompt: str, schema: type[StructuredModelT]) -> StructuredModelT:
+        text = (response.choices[0].message.content or "").strip() if response.choices else ""
+        if not text:
+            raise LLMProviderError("OpenAI returned an empty response.")
+        return LLMGenerationResult(
+            provider=self.provider_name,
+            model=self.settings.medpilot_llm_model or "",
+            text=text,
+            raw={},
+        )
+
+    def generate_structured(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        schema: type[StructuredModelT],
+        conversation_history: list[dict] | None = None,
+    ) -> StructuredModelT:
         self._ensure_enabled()
+        schema_norm = normalize_structured_schema(schema)
+
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+        if conversation_history:
+            messages.extend(conversation_history[-12:])
+        messages.append({"role": "user", "content": user_prompt})
+
+        # Try json_schema mode first (gpt-4o, gpt-4o-mini, gpt-4.1-*)
         try:
-            response = self.client.responses.create(
+            response = self.client.chat.completions.create(
                 model=self.settings.medpilot_llm_model,
-                instructions=system_prompt,
-                input=[{"role": "user", "content": [{"type": "input_text", "text": user_prompt}]}],
-                reasoning={"effort": self.settings.medpilot_llm_reasoning_effort},
-                max_output_tokens=self.settings.medpilot_llm_max_output_tokens,
-                text={
-                    "format": {
-                        "type": "json_schema",
+                messages=messages,
+                max_tokens=self.settings.medpilot_llm_max_output_tokens,
+                temperature=0,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
                         "name": schema.__name__,
                         "strict": True,
-                        "schema": normalize_structured_schema(schema),
-                    }
+                        "schema": schema_norm,
+                    },
                 },
             )
-        except Exception as exc:  # pragma: no cover - network/provider behavior
-            raise LLMProviderError(f"OpenAI structured request failed: {exc}") from exc
-        text = self._extract_text(response.model_dump())
+        except Exception:
+            # Fallback: json_object mode with schema hint in the prompt
+            schema_hint = json.dumps(schema_norm, ensure_ascii=True)
+            fallback_messages = list(messages)
+            fallback_messages[-1] = {
+                "role": "user",
+                "content": (
+                    f"{user_prompt}\n\n"
+                    f"Return ONLY valid JSON matching this schema "
+                    f"(no markdown, no extra text):\n{schema_hint}"
+                ),
+            }
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.settings.medpilot_llm_model,
+                    messages=fallback_messages,
+                    max_tokens=self.settings.medpilot_llm_max_output_tokens,
+                    temperature=0,
+                    response_format={"type": "json_object"},
+                )
+            except Exception as exc2:
+                raise LLMProviderError(
+                    f"OpenAI structured request failed: {exc2}"
+                ) from exc2
+
+        text = (response.choices[0].message.content or "").strip() if response.choices else ""
+        if not text:
+            raise LLMProviderError("OpenAI returned an empty structured response.")
         try:
             return schema.model_validate_json(text)
         except Exception as exc:
-            raise LLMProviderError(f"OpenAI structured response could not be validated for {schema.__name__}: {exc}") from exc
+            raise LLMProviderError(
+                f"OpenAI structured response could not be validated for "
+                f"{schema.__name__}: {exc}"
+            ) from exc
 
     def _ensure_enabled(self) -> None:
         if not self.enabled:
-            raise LLMProviderError("OpenAI provider is not configured. Set OPENAI_API_KEY and MEDPILOT_LLM_MODEL.")
+            raise LLMProviderError(
+                "OpenAI provider is not configured. "
+                "Set OPENAI_API_KEY and MEDPILOT_LLM_MODEL in your .env file."
+            )
 
-    def _build_client(self):
+    def _build_client(self) -> Any:
         if not (self.settings.openai_api_key and self.settings.medpilot_llm_model):
             return None
         try:
             from openai import OpenAI
-        except Exception as exc:  # pragma: no cover - depends on local environment
-            raise LLMProviderError("OpenAI SDK is not installed. Run `pip install -r requirements.txt`.") from exc
+        except ImportError as exc:
+            raise LLMProviderError(
+                "OpenAI SDK is not installed. Run `pip install -r requirements.txt`."
+            ) from exc
         return OpenAI(
             api_key=self.settings.openai_api_key,
             base_url=self.settings.openai_base_url,
             timeout=self.settings.medpilot_llm_timeout_seconds,
         )
-
-    @staticmethod
-    def _extract_text(payload: dict[str, Any]) -> str:
-        if payload.get("output_text"):
-            return payload["output_text"]
-        chunks: list[str] = []
-        for item in payload.get("output", []):
-            if item.get("type") != "message":
-                continue
-            for content in item.get("content", []):
-                if content.get("type") == "output_text":
-                    chunks.append(content.get("text", ""))
-        text = "".join(chunks).strip()
-        if not text:
-            raise LLMProviderError("OpenAI returned an empty response.")
-        return text

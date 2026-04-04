@@ -13,4 +13,7 @@ def build_llm_provider(settings: Settings) -> LLMProvider:
         return OpenAIProvider(settings)
     if provider == "ollama":
         return OllamaProvider(settings)
+    if provider == "anthropic":
+        from app.llm.providers.anthropic_provider import AnthropicProvider
+        return AnthropicProvider(settings)
     return NoOpLLMProvider()

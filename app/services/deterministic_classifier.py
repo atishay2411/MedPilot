@@ -9,7 +9,6 @@ The LLM is used as a fallback only when patterns don't match.
 from __future__ import annotations
 
 import re
-from datetime import datetime
 from typing import Any
 
 from app.services.llm_reasoning import ConversationalDecision
@@ -20,21 +19,21 @@ from app.services.llm_reasoning import ConversationalDecision
 CAPABILITIES_TEXT = """\
 I'm **MedPilot**, your AI clinical copilot for OpenMRS. Here's what I can help with:
 
-**🔍 Patient Management**
+**Patient Management**
 • Search, list, or count patients — *"List all patients"*, *"How many patients are there?"*
 • Register new patients — *"Add a patient named John Doe, born Jan 1 1990"*
 • Update demographics — *"Update Maria Santos gender to F"*
 • Delete patient records — *"Delete patient John Doe"*
 
-**📋 Clinical Data (per patient)**
+**Clinical Data (per patient)**
 • View & record vitals/observations — *"Show Maria's vitals"*, *"Record BP 120/80 for Maria"*
-• View & manage conditions — *"Show conditions for Maria Santos"*
-• View & manage allergies — *"Add penicillin allergy for Maria"*
-• View & manage medications — *"Prescribe metformin 500mg for Maria"*
+• View & manage conditions — *"Show conditions for Maria Santos"*, *"Add condition diabetes for Maria"*
+• View & manage allergies — *"Show allergies for Maria"*, *"Add penicillin allergy for Maria"*
+• View & manage medications — *"Show medications for Maria"*, *"Prescribe metformin 500mg for Maria"*
 • Create encounters — *"Create an encounter for Maria"*
 • Patient analysis & summaries — *"Summarize Maria Santos"*
 
-**⚙️ System**
+**System**
 • FHIR capability statement — *"Show FHIR metadata"*
 • PDF document ingestion
 • Health Gorilla sync
@@ -92,7 +91,6 @@ def parse_date(text: str) -> str | None:
 
 def _extract_date_from_text(text: str) -> tuple[str | None, str]:
     """Extract a date from mixed text. Returns (date_str, text_with_date_removed)."""
-    # Match "born on DD Mon YYYY" / "birthdate: DD Mon YYYY" / "dob: ..."
     patterns = [
         r",?\s*(?:birth\s*date|dob|born(?:\s+on)?)\s*[:=]?\s*(.+?)(?:\s*$|,)",
         r",?\s*(?:birth\s*date|dob|born(?:\s+on)?)\s+(.+?)(?:\s*$|,)",
@@ -109,7 +107,6 @@ def _extract_date_from_text(text: str) -> tuple[str | None, str]:
 
 def _parse_name(text: str) -> tuple[str, str] | None:
     """Parse given_name and family_name from a name string."""
-    # Remove common prefixes like "name:", "full name:", "named"
     text = re.sub(r"^(?:full\s+)?name\s*[:=]\s*", "", text, flags=re.I).strip()
     text = re.sub(r"^named?\s+", "", text, flags=re.I).strip()
     text = re.sub(r"^called\s+", "", text, flags=re.I).strip()
@@ -135,8 +132,8 @@ _HELP_RE = re.compile(
 
 _COUNT_RE = re.compile(
     r"(?:how\s+many\s+patients?|count\s+(?:all\s+)?patients?|"
-    r"patient\s+count|total\s+patients?|number\s+of\s+patients?|"
-    r"how\s+many\s+(?:people|records?))",
+    r"patient\s+count|total\s+(?:number\s+of\s+)?patients?|"
+    r"number\s+of\s+patients?|how\s+many\s+(?:people|records?)\s+(?:are\s+there|do\s+we\s+have))",
     re.I,
 )
 
@@ -153,41 +150,77 @@ _CREATE_PATIENT_RE = re.compile(
     re.I,
 )
 
+# More specific: search by name/query — but not by identifier (IDs are handled separately)
 _SEARCH_RE = re.compile(
-    r"(?:search|find|look\s*up)\s+(?:for\s+)?(?:patient\s+)?(.+)",
+    r"(?:search|find|look\s*up)\s+(?:for\s+)?(?:patient\s+)?([A-Za-z][A-Za-z\s'\-]{1,})",
     re.I,
 )
 
+# Identifier lookup — alphanumeric codes, UUIDs
+_IDENTIFIER_RE = re.compile(
+    r"(?:search|find|look\s*up|get)\s+(?:patient\s+)?(?:with\s+)?(?:id|identifier|uuid|mrn)[\s:=]+([A-Za-z0-9\-]+)",
+    re.I,
+)
+
+# Switch patient — must be explicit "switch/change patient to" or "open chart for"
 _SWITCH_RE = re.compile(
-    r"(?:switch|change)\s+(?:to\s+|the\s+)?(?:patient\s+)?(?:to\s+)?(.+)",
+    r"(?:"
+    r"switch\s+(?:to\s+)?(?:patient\s+)?|"
+    r"change\s+(?:the\s+)?(?:active\s+)?patient\s+to\s+|"
+    r"open\s+chart\s+(?:for\s+)?(?:patient\s+)?|"
+    r"set\s+(?:active\s+)?patient\s+(?:to\s+)?"
+    r")(.+)",
+    re.I,
+)
+
+# Delete patient — must explicitly say "patient" to avoid catching clinical deletes
+_DELETE_PATIENT_RE = re.compile(
+    r"(?:delete|remove|void|purge)\s+(?:the\s+)?patient\s+(.+)",
     re.I,
 )
 
 _VIEW_INTENTS: list[tuple[str, re.Pattern[str]]] = [
     ("get_observations", re.compile(
-        r"(?:show|view|get|see|check|display)\s+(?:(?:the|my|their|me)\s+)?(?:vitals?|observations?|vital\s+signs?)", re.I)),
+        r"(?:show|view|get|see|check|display|list)\s+"
+        r"(?:(?:the|my|their|me|all)\s+)?(?:vitals?|observations?|vital\s+signs?|obs\b)",
+        re.I,
+    )),
     ("get_conditions", re.compile(
-        r"(?:show|view|get|see|check|display)\s+(?:(?:the|my|their|me)\s+)?(?:conditions?|problems?|diagnos\w*|problem\s+list)", re.I)),
+        r"(?:show|view|get|see|check|display|list)\s+"
+        r"(?:(?:the|my|their|me|all)\s+)?(?:conditions?|problems?|diagnos\w*|problem\s+list)",
+        re.I,
+    )),
     ("get_allergies", re.compile(
-        r"(?:show|view|get|see|check|display)\s+(?:(?:the|my|their|me)\s+)?(?:allerg\w*)", re.I)),
+        r"(?:show|view|get|see|check|display|list)\s+"
+        r"(?:(?:the|my|their|me|all)\s+)?(?:allerg\w*)",
+        re.I,
+    )),
     ("get_medications", re.compile(
-        r"(?:show|view|get|see|check|display)\s+(?:(?:the|my|their|me)\s+)?(?:medic\w*|drugs?|prescri\w*)", re.I)),
+        r"(?:show|view|get|see|check|display|list)\s+"
+        r"(?:(?:the|my|their|me|all)\s+)?(?:medic\w*|drugs?|prescri\w*|meds?\b)",
+        re.I,
+    )),
 ]
 
 _ANALYSIS_RE = re.compile(
     r"(?:analy[sz]e|summarize|summary\s+(?:of|for)?|"
-    r"patient\s+analysis|clinical\s+(?:summary|analysis))\s*(?:(?:of|for)\s+)?(.+)?",
-    re.I,
-)
-
-_DELETE_PATIENT_RE = re.compile(
-    r"(?:delete|remove|void)\s+(?:(?:the\s+)?patient\s+)?(.+)",
+    r"patient\s+analysis|clinical\s+(?:summary|analysis)|brief(?:\s+(?:on|for))?)\s*"
+    r"(?:(?:of|for|on)\s+)?(.+)?",
     re.I,
 )
 
 _METADATA_RE = re.compile(
     r"(?:fhir\s+(?:metadata|capabilities?|statement)|"
-    r"show\s+metadata|capability\s+statement|server\s+metadata)",
+    r"show\s+metadata|capability\s+statement|server\s+metadata|"
+    r"what\s+fhir\s+(?:resources?|capabilities?))",
+    re.I,
+)
+
+# ── Greeting / conversational chit-chat ──────────────────────────────
+
+_GREETING_RE = re.compile(
+    r"^(?:hi|hello|hey|howdy|good\s+(?:morning|afternoon|evening)|"
+    r"what'?s?\s+up|greetings?|sup)\W*$",
     re.I,
 )
 
@@ -204,11 +237,6 @@ def try_deterministic_classify(
 
     Returns a ConversationalDecision if a match is found, or None to
     fall through to the LLM.
-
-    Args:
-        prompt: Raw user message.
-        pending_intent: If a clarification slot is active, the pending intent.
-        collected_entities: Already-collected entities from the clarification slot.
     """
     lower = prompt.lower().strip()
 
@@ -217,6 +245,20 @@ def try_deterministic_classify(
         resolved = _try_resolve_clarification(prompt, lower, pending_intent, collected_entities)
         if resolved:
             return resolved
+
+    # ── Simple greeting ───────────────────────────────────────────────
+    if _GREETING_RE.match(lower):
+        return ConversationalDecision(
+            mode="inform",
+            response_message=(
+                "Hello! I'm **MedPilot**, your AI clinical copilot for OpenMRS.\n\n"
+                "I can help you search patients, review clinical data, record vitals, "
+                "manage conditions, allergies, medications, and much more — all in plain language.\n\n"
+                "Try asking: *\"How many patients are there?\"* or *\"Add a patient named John Doe, born 1990-01-01\"*"
+            ),
+            scope="global",
+            confidence=1.0,
+        )
 
     # ── Capabilities / help ───────────────────────────────────────────
     if _HELP_RE.search(lower):
@@ -265,47 +307,46 @@ def try_deterministic_classify(
     if m:
         return _parse_create_patient(m.group(1).strip(), prompt)
 
-    # ── Delete patient ────────────────────────────────────────────────
+    # ── Delete patient (must contain "patient" keyword) ──────────────
     m = _DELETE_PATIENT_RE.search(lower)
     if m:
         patient_text = m.group(1).strip()
         purge = "purge" in lower
         if purge:
-            patient_text = re.sub(r"\s*purge\s*", " ", patient_text).strip()
+            patient_text = re.sub(r"\s*\bpurge\b\s*", " ", patient_text).strip()
         return ConversationalDecision(
             mode="action",
             intent="delete_patient",
             scope="global",
-            confidence=0.9,
+            confidence=0.95,
             entities={"patient_query": patient_text, "purge": purge},
-            response_message=f"Looking up patient to delete...",
+            response_message="Looking up patient to delete...",
         )
 
-    # ── Switch patient ────────────────────────────────────────────────
+    # ── Switch patient (explicit context switch) ──────────────────────
     m = _SWITCH_RE.search(lower)
     if m:
         return ConversationalDecision(
             mode="action",
             intent="switch_patient",
             scope="global",
-            confidence=0.9,
+            confidence=0.95,
             entities={"patient_query": m.group(1).strip()},
-            response_message=f"Switching patient...",
+            response_message="Switching patient context...",
         )
 
-    # ── Search patient ────────────────────────────────────────────────
-    m = _SEARCH_RE.search(lower)
+    # ── Identifier lookup ─────────────────────────────────────────────
+    m = _IDENTIFIER_RE.search(lower)
     if m:
-        query = m.group(1).strip()
-        if query:
-            return ConversationalDecision(
-                mode="action",
-                intent="search_patient",
-                scope="global",
-                confidence=0.9,
-                entities={"patient_query": query},
-                response_message=f"Searching for '{query}'...",
-            )
+        identifier = m.group(1).strip()
+        return ConversationalDecision(
+            mode="action",
+            intent="search_by_identifier",
+            scope="global",
+            confidence=0.95,
+            entities={"identifier": identifier},
+            response_message=f"Looking up patient by identifier '{identifier}'...",
+        )
 
     # ── View clinical data (vitals, conditions, allergies, meds) ──────
     for intent, pattern in _VIEW_INTENTS:
@@ -324,8 +365,7 @@ def try_deterministic_classify(
     # ── Patient analysis ──────────────────────────────────────────────
     m = _ANALYSIS_RE.search(lower)
     if m:
-        patient_query = (m.group(1) or "").strip() if m.lastindex else None
-        patient_query = patient_query or None
+        patient_query = (m.group(1) or "").strip() or None
         return ConversationalDecision(
             mode="action",
             intent="patient_analysis",
@@ -334,6 +374,22 @@ def try_deterministic_classify(
             entities={"patient_query": patient_query} if patient_query else {},
             response_message="Running patient analysis...",
         )
+
+    # ── Name-only search (fallback for "find <name>") ─────────────────
+    m = _SEARCH_RE.search(lower)
+    if m:
+        query = m.group(1).strip().rstrip(".!?,;:")
+        # Skip single common words that aren't patient names
+        skip_words = {"all", "patients", "patient", "everyone", "me", "them", "anyone"}
+        if query and query.lower() not in skip_words:
+            return ConversationalDecision(
+                mode="action",
+                intent="search_patient",
+                scope="global",
+                confidence=0.85,
+                entities={"patient_query": query},
+                response_message=f"Searching for '{query}'...",
+            )
 
     # No deterministic match — fall through to LLM
     return None
@@ -348,11 +404,14 @@ def _extract_patient_from_tail(text: str) -> str | None:
         name = m.group(1).strip().rstrip(".!?,;:")
         if name:
             return name
-    # Check if there's just a name at the end
     text = text.strip().rstrip(".!?,;:")
-    if text and not re.match(r"^(?:please|now|again|today)$", text, re.I):
+    if text and not re.match(r"^(?:please|now|again|today|me|them|their|this|the)$", text, re.I):
         words = text.split()
-        if 1 <= len(words) <= 4 and all(w[0].isupper() or w[0] == "'" for w in words if w):
+        if 1 <= len(words) <= 4 and all(
+            w[0].isupper() or w[0] == "'"
+            for w in words
+            if w
+        ):
             return text
     return None
 
@@ -361,12 +420,10 @@ def _parse_create_patient(name_text: str, original_prompt: str) -> Conversationa
     """Parse a create_patient intent with optional DOB from the matched text."""
     entities: dict[str, Any] = {}
 
-    # Try to extract DOB from the text
     date, name_text = _extract_date_from_text(name_text)
     if date:
         entities["birthdate"] = date
 
-    # Also look in the original prompt for DOB patterns
     if not date:
         date, _ = _extract_date_from_text(original_prompt)
         if date:
@@ -377,7 +434,6 @@ def _parse_create_patient(name_text: str, original_prompt: str) -> Conversationa
         entities["given_name"] = parsed[0]
         entities["family_name"] = parsed[1] if parsed[1] else None
 
-    # All required fields present?
     if all(entities.get(f) for f in ("given_name", "family_name", "birthdate")):
         return ConversationalDecision(
             mode="action",
@@ -385,18 +441,23 @@ def _parse_create_patient(name_text: str, original_prompt: str) -> Conversationa
             scope="global",
             confidence=1.0,
             entities=entities,
-            response_message=f"Registering patient {entities['given_name']} {entities['family_name']}...",
+            response_message=(
+                f"Registering patient {entities['given_name']} {entities['family_name']}..."
+            ),
         )
 
-    # Partial match — ask for missing fields
     missing = [f for f in ("given_name", "family_name", "birthdate") if not entities.get(f)]
     display_name = f"{entities.get('given_name', '?')} {entities.get('family_name', '')}".strip()
+
     if "birthdate" in missing and entities.get("given_name"):
         question = f"I have the name **{display_name}**. What is their date of birth?"
     elif "family_name" in missing and entities.get("given_name"):
-        question = f"I have the first name **{entities['given_name']}**. What is their last name and date of birth?"
+        question = (
+            f"I have the first name **{entities['given_name']}**. "
+            "What is their last name and date of birth?"
+        )
     else:
-        question = "I need the patient's full name and birthdate. Could you provide those details?"
+        question = "I need the patient's full name and date of birth. Could you provide those details?"
 
     return ConversationalDecision(
         mode="clarify",
@@ -422,7 +483,6 @@ def _try_resolve_clarification(
 
     entities = dict(collected_entities)
 
-    # ── Parse "Name: X, Birthdate: Y" combined format ──────────────────
     name_m = re.search(r"(?:full\s+)?name\s*[:=]\s*([^,]+)", lower)
     if name_m:
         parsed = _parse_name(name_m.group(1).strip())
@@ -430,19 +490,19 @@ def _try_resolve_clarification(
             entities["given_name"] = parsed[0]
             entities["family_name"] = parsed[1] if parsed[1] else entities.get("family_name")
 
-    dob_m = re.search(r"(?:birth\s*date|dob|born(?:\s+on)?)\s*[:=]?\s*(.+?)(?:\s*$|,)", lower)
+    dob_m = re.search(
+        r"(?:birth\s*date|dob|born(?:\s+on)?)\s*[:=]?\s*(.+?)(?:\s*$|,)", lower
+    )
     if dob_m:
         date = parse_date(dob_m.group(1).strip())
         if date:
             entities["birthdate"] = date
 
-    # ── If the whole message is just a date ─────────────────────────────
     if not entities.get("birthdate"):
         date = parse_date(prompt.strip())
         if date:
             entities["birthdate"] = date
 
-    # ── "Full name is X Y, born on Z" format ───────────────────────────
     if not entities.get("birthdate") or not entities.get("given_name"):
         m = re.search(
             r"(?:full\s+)?name\s*(?:is|:=?)\s*([^,]+?)[\s,]+(?:birth\s*date|dob|born(?:\s+on)?)\s*[:=]?\s*(.+)",
@@ -457,7 +517,6 @@ def _try_resolve_clarification(
             if date:
                 entities["birthdate"] = date
 
-    # ── Check if all required fields now satisfied ─────────────────────
     if all(entities.get(f) for f in ("given_name", "family_name", "birthdate")):
         return ConversationalDecision(
             mode="action",
@@ -465,10 +524,11 @@ def _try_resolve_clarification(
             scope="global",
             confidence=1.0,
             entities=entities,
-            response_message=f"Registering patient {entities['given_name']} {entities['family_name']}...",
+            response_message=(
+                f"Registering patient {entities['given_name']} {entities['family_name']}..."
+            ),
         )
 
-    # Still missing fields — continue clarification
     missing = [f for f in ("given_name", "family_name", "birthdate") if not entities.get(f)]
     if missing:
         display_name = f"{entities.get('given_name', '?')} {entities.get('family_name', '')}".strip()
@@ -491,19 +551,12 @@ def _try_resolve_clarification(
 
 
 def sanitize_response_message(message: str) -> str:
-    """Strip leaked session context from LLM response messages.
-
-    Small LLMs sometimes regurgitate raw prompt context into their response.
-    This detects and removes those artifacts.
-    """
-    # Pattern: response contains "[intent: ..." or "[USER]:" or "[ASSISTANT]:"
+    """Strip leaked session context from LLM response messages."""
     if "[intent:" in message or "[USER]:" in message or "[ASSISTANT]:" in message:
-        # Find the first occurrence of leaked context and truncate
-        for marker in ("[intent:", "[USER]:", "[ASSISTANT]:"):
+        for marker in ["[intent:", "[USER]:", "[ASSISTANT]:"]:
             idx = message.find(marker)
             if idx > 0:
                 message = message[:idx].strip()
                 break
-    # Strip trailing brackets/artifacts
     message = re.sub(r"\s*\[.*$", "", message)
     return message.strip()

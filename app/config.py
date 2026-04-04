@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
     ollama_base_url: str = "http://localhost:11434/api"
+    anthropic_api_key: str | None = None
 
     request_timeout_seconds: float = 10.0
     max_retries: int = 3

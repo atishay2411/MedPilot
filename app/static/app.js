@@ -3,73 +3,18 @@ const transcriptEl = document.getElementById("transcript");
 const promptEl = document.getElementById("prompt");
 const fileInputEl = document.getElementById("file-input");
 const uploadBtn = document.getElementById("upload-btn");
-const patientContextEl = document.getElementById("patient-context");
 const llmBadgeEl = document.getElementById("llm-badge");
 const welcomeScreen = document.getElementById("welcome-screen");
-const SESSION_STORAGE_KEY = "medpilot-session-id";
 
 // ── State ─────────────────────────────────────────────────────────────
 const state = {
-  sessionId: window.localStorage.getItem(SESSION_STORAGE_KEY) || "",
-  currentPatientUuid: "",
-  currentPatientDisplay: "",
   hasMessages: false,
+  conversationHistory: [], // [{role: "user"|"assistant", content: "..."}]
 };
 
-// ── Patient context ───────────────────────────────────────────────────
-function renderPatientContext() {
-  if (!state.currentPatientUuid) {
-    patientContextEl.innerHTML = '<span class="no-patient">No patient selected</span>';
-    patientContextEl.classList.remove("active");
-    return;
-  }
-  patientContextEl.classList.add("active");
-  patientContextEl.innerHTML = `
-    <div class="patient-name"><span class="status-dot"></span>${escapeHtml(state.currentPatientDisplay || "Resolved Patient")}</div>
-    <div class="patient-uuid">${escapeHtml(state.currentPatientUuid)}</div>
-  `;
-}
-
-function applySessionState(sessionState) {
-  if (!sessionState) return;
-  if (sessionState.id) {
-    state.sessionId = sessionState.id;
-    window.localStorage.setItem(SESSION_STORAGE_KEY, state.sessionId);
-  }
-  state.currentPatientUuid = sessionState.current_patient_uuid || "";
-  state.currentPatientDisplay = sessionState.current_patient_display || "";
-  renderPatientContext();
-}
-
-// ── Session management ────────────────────────────────────────────────
-async function ensureSession() {
-  if (state.sessionId) return state.sessionId;
-  const response = await fetch("/api/chat/session", { method: "POST" });
-  const payload = await response.json();
-  if (!response.ok || payload.ok === false) throw new Error("Unable to create chat session.");
-  applySessionState(payload.data);
-  return state.sessionId;
-}
-
-async function restoreSession() {
-  if (!state.sessionId) return;
-  const response = await fetch(`/api/chat/session/${encodeURIComponent(state.sessionId)}`);
-  const payload = await response.json();
-  if (!response.ok || payload.ok === false) {
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
-    state.sessionId = "";
-    return;
-  }
-  applySessionState(payload.data);
-}
-
 function newChat() {
-  window.localStorage.removeItem(SESSION_STORAGE_KEY);
-  state.sessionId = "";
-  state.currentPatientUuid = "";
-  state.currentPatientDisplay = "";
   state.hasMessages = false;
-  renderPatientContext();
+  state.conversationHistory = [];
   transcriptEl.innerHTML = "";
   showWelcome();
 }
@@ -199,17 +144,6 @@ function renderPendingAction(pendingAction) {
 }
 
 function renderAssistantResponse(payload) {
-  if (payload.session_id) {
-    state.sessionId = payload.session_id;
-    window.localStorage.setItem(SESSION_STORAGE_KEY, payload.session_id);
-  }
-  applySessionState(payload.session_state);
-  const patientContext = payload.patient_context;
-  if (patientContext?.uuid && !payload.session_state) {
-    state.currentPatientUuid = patientContext.uuid;
-    state.currentPatientDisplay = patientContext.display || patientContext.uuid;
-    renderPatientContext();
-  }
 
   const intentBadge = payload.intent && !["inform", "clarify"].includes(payload.intent)
     ? `<span class="intent-badge">${escapeHtml(payload.intent)}</span>`
@@ -234,10 +168,11 @@ function renderAssistantResponse(payload) {
 
 // ── API calls ─────────────────────────────────────────────────────────
 async function sendChat(prompt, file = null) {
-  await ensureSession();
   const formData = new FormData();
   formData.append("prompt", prompt);
-  formData.append("session_id", state.sessionId);
+  if (state.conversationHistory.length > 0) {
+    formData.append("history", JSON.stringify(state.conversationHistory.slice(-14)));
+  }
   if (file) formData.append("file", file);
 
   const response = await fetch("/api/chat", { method: "POST", body: formData });
@@ -316,6 +251,12 @@ document.getElementById("chat-form").addEventListener("submit", async (event) =>
     const payload = await sendChat(prompt, fileInputEl.files[0] || null);
     removeTypingIndicator();
     renderAssistantResponse(payload);
+    // Update conversation history for context
+    state.conversationHistory.push({ role: "user", content: prompt });
+    const assistantContent = payload.summary || payload.message || "";
+    if (assistantContent) {
+      state.conversationHistory.push({ role: "assistant", content: assistantContent });
+    }
     fileInputEl.value = "";
     uploadBtn.classList.remove("has-file");
   } catch (error) {
@@ -383,9 +324,4 @@ document.querySelectorAll(".quick-action, .welcome-suggestion").forEach((el) => 
 document.getElementById("new-chat-btn").addEventListener("click", newChat);
 
 // ── Init ──────────────────────────────────────────────────────────────
-renderPatientContext();
 refreshLLMStatus();
-(async () => {
-  await restoreSession().catch(() => {});
-  await ensureSession().catch(() => {});
-})();

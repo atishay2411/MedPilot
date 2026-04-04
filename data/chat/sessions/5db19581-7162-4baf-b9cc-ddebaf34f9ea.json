@@ -1,7 +1,7 @@
 {
   "id": "5db19581-7162-4baf-b9cc-ddebaf34f9ea",
   "created_at": "2026-04-04T19:08:34.994299+00:00",
-  "updated_at": "2026-04-04T22:11:49.977417+00:00",
+  "updated_at": "2026-04-04T22:53:38.345017+00:00",
   "current_patient_uuid": null,
   "current_patient_display": null,
   "last_intent": "create_patient",
@@ -18,11 +18,11 @@
     ],
     "patient_uuid": null,
     "patient_display": null,
-    "turn_count": 7
+    "turn_count": 14
   },
   "pending_workflow": {
     "intent": "create_patient",
-    "original_prompt": "i did",
+    "original_prompt": "family name is Jain",
     "collected_entities": {
       "given_name": "Atishay",
       "family_name": null,
@@ -36,90 +36,6 @@
     "patient_display": null
   },
   "recent_turns": [
-    {
-      "role": "user",
-      "content": "Wrong",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "Can you please provide more context or clarify what you mean by 'Wrong'? Which patient were you referring to?",
-      "intent": "search_patient",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Show their allergies",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I ran into an issue: A patient name, identifier, or UUID is required for this action.",
-      "intent": "get_allergies",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Select patient Nesh test",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I encountered an error processing your request: Ollama request failed: timed out. Please try again.",
-      "intent": "inform",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Add a patient named Atishay",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I have the name **Atishay None**. What is their date of birth?",
-      "intent": "create_patient",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "24 nov 2000",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I still need: family_name. Could you provide those?",
-      "intent": "create_patient",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Jain",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I still need: family_name. Could you provide those?",
-      "intent": "create_patient",
-      "patient_uuid": null
-    },
-    {
-      "role": "user",
-      "content": "Atishay Jain",
-      "intent": null,
-      "patient_uuid": null
-    },
-    {
-      "role": "assistant",
-      "content": "I still need: family_name. Could you provide those?",
-      "intent": "create_patient",
-      "patient_uuid": null
-    },
     {
       "role": "user",
       "content": "family name is Jain",
@@ -147,6 +63,90 @@
     {
       "role": "user",
       "content": "i did",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I still need: family_name. Could you provide those?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "What can you do?",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I still need: family_name. Could you provide those?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Hello",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I still need: family_name. Could you provide those?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Hello",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I still need: family_name. Could you provide those?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "What can you do",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I still need: family_name. Could you provide those?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "How many people are present?",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I still need: family_name. Could you provide those?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "Add Atishay Jain to openmrs",
+      "intent": null,
+      "patient_uuid": null
+    },
+    {
+      "role": "assistant",
+      "content": "I still need: family_name. Could you provide those?",
+      "intent": "create_patient",
+      "patient_uuid": null
+    },
+    {
+      "role": "user",
+      "content": "family name is Jain",
       "intent": null,
       "patient_uuid": null
     },

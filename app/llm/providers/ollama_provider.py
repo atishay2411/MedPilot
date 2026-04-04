@@ -35,13 +35,14 @@ class OllamaProvider(LLMProvider):
             raise LLMProviderError("Ollama returned an empty response.")
         return LLMGenerationResult(provider=self.provider_name, model=self.settings.medpilot_llm_model or "", text=text, raw=payload)
 
-    def generate_structured(self, *, system_prompt: str, user_prompt: str, schema: type[StructuredModelT]) -> StructuredModelT:
+    def generate_structured(self, *, system_prompt: str, user_prompt: str, schema: type[StructuredModelT], conversation_history: list[dict] | None = None) -> StructuredModelT:
         payload = self._request(
             {
                 "model": self.settings.medpilot_llm_model,
                 "messages": self._messages(
                     system_prompt,
                     f"{user_prompt}\n\nReturn valid JSON that matches this schema exactly:\n{json.dumps(normalize_structured_schema(schema), ensure_ascii=True)}",
+                    conversation_history,
                 ),
                 "stream": False,
                 "format": normalize_structured_schema(schema),
@@ -68,8 +69,9 @@ class OllamaProvider(LLMProvider):
             raise LLMProviderError(f"Ollama request failed: {exc}") from exc
 
     @staticmethod
-    def _messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
-        return [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
+    def _messages(system_prompt: str, user_prompt: str, conversation_history: list[dict] | None = None) -> list[dict[str, str]]:
+        msgs: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        if conversation_history:
+            msgs.extend(conversation_history[-12:])
+        msgs.append({"role": "user", "content": user_prompt})
+        return msgs

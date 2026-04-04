@@ -15,5 +15,5 @@ class NoOpLLMProvider(LLMProvider):
     def generate_text(self, *, system_prompt: str, user_prompt: str) -> LLMGenerationResult:
         raise LLMProviderError("No LLM provider is configured.")
 
-    def generate_structured(self, *, system_prompt: str, user_prompt: str, schema: type[StructuredModelT]) -> StructuredModelT:
+    def generate_structured(self, *, system_prompt: str, user_prompt: str, schema: type[StructuredModelT], conversation_history: list[dict] | None = None) -> StructuredModelT:
         raise LLMProviderError("No LLM provider is configured.")

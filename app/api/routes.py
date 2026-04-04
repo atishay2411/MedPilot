@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -13,7 +14,6 @@ from app.dependencies import (
     get_allergy_service,
     get_audit_logger,
     get_chat_agent_service,
-    get_chat_session_store,
     get_condition_service,
     get_encounter_service,
     get_ingestion_service,
@@ -43,7 +43,6 @@ from app.models.domain import (
 )
 from app.services.allergies import AllergyService
 from app.services.chat_agent import ChatAgentService
-from app.services.chat_sessions import ChatSessionStore
 from app.services.conditions import ConditionService
 from app.services.encounters import EncounterService
 from app.services.ingestion import IngestionService
@@ -80,34 +79,28 @@ def llm_status(settings: Settings = Depends(get_settings), provider: LLMProvider
     )
 
 
-@router.post("/chat/session")
-def create_chat_session(store: ChatSessionStore = Depends(get_chat_session_store)) -> ApiResponse:
-    session = store.create()
-    return ApiResponse(data=session.snapshot())
-
-
-@router.get("/chat/session/{session_id}")
-def get_chat_session(session_id: str, store: ChatSessionStore = Depends(get_chat_session_store)) -> ApiResponse:
-    session = store.get(session_id)
-    return ApiResponse(data=session.snapshot())
-
-
 @router.post("/chat")
 async def chat(
     prompt: str = Form(...),
-    session_id: str | None = Form(None),
     patient_uuid: str | None = Form(None),
+    history: str | None = Form(None),
     file: UploadFile | None = File(None),
     actor: Actor = Depends(get_actor),
     service: ChatAgentService = Depends(get_chat_agent_service),
 ) -> ApiResponse:
+    conversation_history: list[dict] | None = None
+    if history:
+        try:
+            conversation_history = json.loads(history)
+        except Exception:
+            conversation_history = None
     temp_path: Path | None = None
     try:
         if file:
             with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename or "upload.bin").suffix or ".bin") as temp_file:
                 temp_file.write(await file.read())
                 temp_path = Path(temp_file.name)
-        response = service.handle_message(prompt, actor, session_id=session_id, patient_uuid=patient_uuid, attachment_path=str(temp_path) if temp_path else None)
+        response = service.handle_message(prompt, actor, patient_uuid=patient_uuid, attachment_path=str(temp_path) if temp_path else None, conversation_history=conversation_history)
         return ApiResponse(data=response.model_dump())
     except Exception:
         if temp_path and temp_path.exists():

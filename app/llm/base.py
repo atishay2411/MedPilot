@@ -31,6 +31,7 @@ class LLMProvider(ABC):
         system_prompt: str,
         user_prompt: str,
         schema: type[StructuredModelT],
+        conversation_history: list[dict] | None = None,
     ) -> StructuredModelT:
         raise NotImplementedError
 
