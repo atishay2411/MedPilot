@@ -33,11 +33,19 @@ class PatientService:
             return self.search_by_identifier(normalized_query)
         return results
 
-    def list_all(self, *, limit: int = 100) -> list[dict[str, Any]]:
-        bundle = self.client.get("/ws/fhir2/R4/Patient", params={"_count": limit})
+    def list_all(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        # Sort newest-first so recently registered patients always appear in the
+        # first page, and exclude voided/inactive records (active=false).
+        bundle = self.client.get(
+            "/ws/fhir2/R4/Patient",
+            params={"_count": limit, "_sort": "-_lastUpdated"},
+        )
         results: list[dict[str, Any]] = []
         for entry in bundle.get("entry", []):
             resource = entry.get("resource", {})
+            # Skip voided patients — OpenMRS FHIR2 marks them active=false
+            if resource.get("active") is False:
+                continue
             normalized = self._normalize_fhir_patient(resource)
             if normalized.get("uuid"):
                 results.append(normalized)

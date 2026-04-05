@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { 
-  Bot, User, Send, Paperclip, Plus, 
-  Activity, ActivitySquare, Pill, ClipboardList, 
+import {
+  Bot, User, Send, Plus,
+  Activity, ActivitySquare, Pill, ClipboardList,
   Search, ShieldAlert, BadgeInfo, Mic, MicOff, HeartPulse, UserCircle2
 } from 'lucide-react';
 
@@ -24,9 +24,7 @@ export default function App() {
   const [llmStatus, setLlmStatus] = useState(null);
   const [patientData, setPatientData] = useState(null);
   const [isListening, setIsListening] = useState(false);
-  
-  const fileInputRef = useRef(null);
-  const [selectedFile, setSelectedFile] = useState(null);
+
   const chatEndRef = useRef(null);
   const speechRecognitionRef = useRef(null);
 
@@ -113,7 +111,7 @@ export default function App() {
 
   const sendMessage = async (overridePrompt = null) => {
     const textToSend = overridePrompt || input;
-    if (!textToSend.trim() && !selectedFile) return;
+    if (!textToSend.trim()) return;
 
     if (isListening && speechRecognitionRef.current) {
         speechRecognitionRef.current.stop();
@@ -140,17 +138,15 @@ export default function App() {
         return { role: m.role, content: patientPrefix + (m.content.message || '') };
       });
       if (history.length > 0) formData.append('history', JSON.stringify(history.slice(-14)));
-      if (selectedFile) formData.append('file', selectedFile);
 
       const res = await fetch('/api/chat', { method: 'POST', body: formData });
       const payload = await res.json();
-      
+
       if (res.ok && payload.ok) {
         setMessages(prev => [...prev, { role: 'assistant', content: payload.data }]);
         if (payload.data?.patient_context?.uuid) {
           setPatientUuid(payload.data.patient_context.uuid);
         }
-        setSelectedFile(null);
       } else {
         setMessages(prev => [...prev, { role: 'assistant', content: { message: `Error: ${payload.error || 'Unknown error'}` } }]);
       }
@@ -397,32 +393,9 @@ export default function App() {
         {/* INPUT TRAY */}
         <div className="absolute bottom-0 w-full bg-gradient-to-t from-slate-50 via-slate-50 to-transparent pt-10 pb-6 px-6 z-20">
           <div className="max-w-4xl mx-auto">
-            {selectedFile && (
-              <div className="mb-2 inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold shadow-sm">
-                <Paperclip size={14} />
-                {selectedFile.name}
-                <button onClick={() => setSelectedFile(null)} className="ml-2 hover:text-indigo-900">✕</button>
-              </div>
-            )}
-            
             <div className={`relative flex items-center shadow-lg rounded-2xl bg-white border ring-1 transition-all
               ${isListening ? 'border-rose-300 ring-rose-100 shadow-rose-100' : 'border-slate-200 ring-slate-100 focus-within:ring-indigo-500 focus-within:border-indigo-500'}
             `}>
-              <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="p-3.5 text-slate-400 hover:text-indigo-600 transition-colors ml-1"
-                title="Attach PDF"
-              >
-                <Paperclip size={20} />
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  className="hidden" 
-                  accept=".pdf" 
-                  onChange={(e) => setSelectedFile(e.target.files[0])}
-                />
-              </button>
-              
               <input
                 type="text"
                 value={input}
@@ -449,7 +422,7 @@ export default function App() {
 
               <button 
                 onClick={() => sendMessage()}
-                disabled={!input.trim() && !selectedFile || isLoading}
+                disabled={!input.trim() || isLoading}
                 className="m-2 p-2.5 bg-slate-900 text-white rounded-xl hover:bg-indigo-600 disabled:opacity-50 disabled:hover:bg-slate-900 transition-all shadow-sm"
               >
                 <Send size={18} className="translate-x-[-1px] translate-y-[1px]" />
