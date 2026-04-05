@@ -8,6 +8,8 @@ from app.llm.factory import build_llm_provider
 from app.llm.base import LLMProvider
 from app.services.allergies import AllergyService
 from app.services.chat_agent import ChatAgentService
+from app.services.notes import NotesService
+from app.services.visits import VisitService
 from app.services.conditions import ConditionService
 from app.services.encounters import EncounterService
 from app.services.ingestion import IngestionService
@@ -125,6 +127,16 @@ def get_ingestion_service() -> IngestionService:
 
 
 @lru_cache(maxsize=1)
+def get_visit_service() -> VisitService:
+    return VisitService(get_openmrs_client())
+
+
+@lru_cache(maxsize=1)
+def get_notes_service() -> NotesService:
+    return NotesService(get_openmrs_client())
+
+
+@lru_cache(maxsize=1)
 def get_chat_agent_service() -> ChatAgentService:
     return ChatAgentService(
         get_llm_reasoning_service(),
@@ -139,4 +151,6 @@ def get_chat_agent_service() -> ChatAgentService:
         get_encounter_service(),
         get_ingestion_service(),
         get_population_service(),
+        get_visit_service(),
+        get_notes_service(),
     )

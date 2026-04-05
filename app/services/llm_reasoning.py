@@ -81,6 +81,14 @@ OBSERVATION RECORDING RULES:
   - Oxygen saturation / SpO2 → display="Oxygen Saturation (SpO2)", code="5092"
   - Systolic BP → display="Systolic blood pressure", code="5085"
   - Diastolic BP → display="Diastolic blood pressure", code="5086"
+  - Pulse rate / Heart rate / Pulse → display="Pulse rate", code="5087", unit=/min
+  - BMI / Body mass index → display="BMI", code="1342", unit=kg/m2
+  - Head circumference → display="Head circumference", code="5314", unit=cm
+  - Blood glucose (random) → display="Blood glucose", code="887", unit=mmol/L
+  - Fasting blood glucose → display="Fasting blood glucose", code="2339", unit=mmol/L
+  - CD4 count → display="CD4 count", code="5497", unit=cells/µL
+  - Hemoglobin → display="Hemoglobin", code="21", unit=g/dL
+  - Pain scale / Pain score → display="Pain scale", code="160643", unit="" (value 0-10)
 - Blood pressure like "120/80" → TWO observations: systolic=120, diastolic=80.
 - Each observation must have: display, code, value (numeric), unit.
 - observations field must be a LIST even for a single vital sign.
@@ -91,6 +99,14 @@ CLINICAL WRITE RULES:
 - create_allergy: allergen_name required. severity defaults to "moderate". reaction defaults to "rash".
 - create_medication: drug_name, dose, dose_units_name, route_name, frequency_name, duration, duration_units_name, quantity, quantity_units_name all required.
 - delete operations: always resolve the patient first via patient_query.
+- create_clinical_note: note_text is required. note_type defaults to "note". Other types: "chief complaint", "clinical impression", "assessment".
+- search_drugs: drug_query required. Use when user asks about available drugs/medications/formulary.
+- search_providers: Use when user asks about providers/clinicians/doctors.
+- search_locations: Use when user asks about locations/wards/clinics/facilities.
+- get_encounters: Use when user asks about patient encounters/visit history/appointments attended.
+- get_visits: Use when user asks about patient visit records from the visit module.
+- get_programs: Use when user asks about patient programs/enrollments or lists all programs.
+- get_encounter_types: scope=global. Use when user asks what encounter types are available.
 
 NAME PARSING RULES FOR create_patient:
 - "Add a patient named John Smith" → given_name="John", family_name="Smith"

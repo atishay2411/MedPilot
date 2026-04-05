@@ -24,6 +24,23 @@ VITALS_CODE_MAP: dict[str, str] = {
     "Systolic Blood Pressure": "5085",
     "Diastolic blood pressure": "5086",
     "Diastolic Blood Pressure": "5086",
+    "Pulse rate": "5087",
+    "Heart rate": "5087",
+    "Pulse": "5087",
+    "BMI": "1342",
+    "Body mass index": "1342",
+    "Head circumference": "5314",
+    "MUAC": "1343",
+    "Mid-upper arm circumference": "1343",
+    "Blood glucose": "887",
+    "Random blood glucose": "887",
+    "Fasting blood glucose": "2339",
+    "CD4 count": "5497",
+    "Hemoglobin": "21",
+    "Haemoglobin": "21",
+    "Creatinine": "790",
+    "Pain scale": "160643",
+    "Pain score": "160643",
 }
 
 # Observation display → FHIR category code
@@ -32,8 +49,46 @@ _CATEGORY_MAP: dict[str, str] = {
     "Height": "exam",
     "Weight (kg)": "exam",
     "Weight": "exam",
+    "Pulse rate": "vital-signs",
+    "Heart rate": "vital-signs",
+    "Pulse": "vital-signs",
+    "BMI": "exam",
+    "Body mass index": "exam",
+    "Head circumference": "exam",
+    "MUAC": "exam",
+    "Mid-upper arm circumference": "exam",
+    "Blood glucose": "laboratory",
+    "Random blood glucose": "laboratory",
+    "Fasting blood glucose": "laboratory",
+    "CD4 count": "laboratory",
+    "Hemoglobin": "laboratory",
+    "Haemoglobin": "laboratory",
+    "Creatinine": "laboratory",
+    "Pain scale": "survey",
+    "Pain score": "survey",
 }
 _DEFAULT_CATEGORY = "vital-signs"
+
+# Observation display → (unit string, UCUM code) tuple
+_UNIT_MAP: dict[str, tuple[str, str]] = {
+    "Pulse rate": ("/min", "/min"),
+    "Heart rate": ("/min", "/min"),
+    "Pulse": ("/min", "/min"),
+    "BMI": ("kg/m2", "kg/m2"),
+    "Body mass index": ("kg/m2", "kg/m2"),
+    "Head circumference": ("cm", "cm"),
+    "MUAC": ("cm", "cm"),
+    "Mid-upper arm circumference": ("cm", "cm"),
+    "Blood glucose": ("mmol/L", "mmol/L"),
+    "Random blood glucose": ("mmol/L", "mmol/L"),
+    "Fasting blood glucose": ("mmol/L", "mmol/L"),
+    "CD4 count": ("cells/µL", "cells/uL"),
+    "Hemoglobin": ("g/dL", "g/dL"),
+    "Haemoglobin": ("g/dL", "g/dL"),
+    "Creatinine": ("mg/dL", "mg/dL"),
+    "Pain scale": ("", ""),
+    "Pain score": ("", ""),
+}
 
 # Unit → UCUM code
 _UNIT_CODE_MAP: dict[str, str] = {

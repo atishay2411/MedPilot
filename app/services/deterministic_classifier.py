@@ -216,6 +216,37 @@ _METADATA_RE = re.compile(
     re.I,
 )
 
+# Get encounters pattern
+_GET_ENCOUNTERS_RE = re.compile(
+    r"(?:list|show|get|view|display|what(?:'s| are))?"
+    r"\s*(?:patient'?s?\s+)?(?:encounter|visit)s?\s+(?:for|of)?\s*(?:this\s+patient|them|him|her|it)?",
+    re.IGNORECASE,
+)
+
+# Search drugs pattern
+_SEARCH_DRUGS_RE = re.compile(
+    r"(?:search|find|look\s+up|is|are)\s+(?:for\s+)?(?:drug|medication|medicine|formulary)s?\s+(.+)",
+    re.IGNORECASE,
+)
+
+# Search providers
+_SEARCH_PROVIDERS_RE = re.compile(
+    r"(?:list|show|search|find|get)\s+(?:all\s+)?(?:provider|clinician|doctor|physician|nurse)s?",
+    re.IGNORECASE,
+)
+
+# Search locations
+_SEARCH_LOCATIONS_RE = re.compile(
+    r"(?:list|show|search|find|get)\s+(?:all\s+)?(?:location|ward|clinic|facility|hospital|department)s?",
+    re.IGNORECASE,
+)
+
+# Encounter types
+_ENCOUNTER_TYPES_RE = re.compile(
+    r"(?:list|show|what|get)\s+(?:available\s+)?encounter\s+types?",
+    re.IGNORECASE,
+)
+
 # ── Greeting / conversational chit-chat ──────────────────────────────
 
 _GREETING_RE = re.compile(
@@ -390,6 +421,27 @@ def try_deterministic_classify(
                 entities={"patient_query": query},
                 response_message=f"Searching for '{query}'...",
             )
+
+    # ── Search providers ──────────────────────────────────────────────
+    if _SEARCH_PROVIDERS_RE.search(lower):
+        return ConversationalDecision(
+            mode="action", intent="search_providers", confidence=0.9, scope="global",
+            entities={}, response_message="Searching providers...",
+        )
+
+    # ── Search locations ──────────────────────────────────────────────
+    if _SEARCH_LOCATIONS_RE.search(lower):
+        return ConversationalDecision(
+            mode="action", intent="search_locations", confidence=0.9, scope="global",
+            entities={}, response_message="Searching locations...",
+        )
+
+    # ── Encounter types ───────────────────────────────────────────────
+    if _ENCOUNTER_TYPES_RE.search(lower):
+        return ConversationalDecision(
+            mode="action", intent="get_encounter_types", confidence=0.9, scope="global",
+            entities={}, response_message="Fetching encounter types...",
+        )
 
     # No deterministic match — fall through to LLM
     return None

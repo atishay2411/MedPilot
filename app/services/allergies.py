@@ -22,10 +22,38 @@ class AllergyService:
         results = self.list_rest_for_patient(patient_uuid).get("results", [])
         return any(item.get("allergen", {}).get("codedAllergen", {}).get("uuid") == allergen_uuid for item in results)
 
-    def build_rest_payload(self, allergen_name: str, severity: str, reaction: str, comment: str | None) -> dict[str, Any]:
+    def build_rest_payload(
+        self,
+        allergen_name: str,
+        severity: str,
+        reaction: str,
+        comment: str | None = None,
+        allergen_type: str | None = None,
+    ) -> dict[str, Any]:
+        # Auto-detect allergen type if not specified
+        if not allergen_type:
+            food_keywords = {
+                "peanut", "nut", "milk", "egg", "wheat", "gluten", "soy", "fish",
+                "shellfish", "seafood", "shrimp", "crab", "lobster", "dairy",
+                "lactose", "pollen", "dust", "mold", "latex", "bee", "wasp",
+                "fruit", "banana", "mango", "strawberry", "citrus",
+            }
+            env_keywords = {
+                "pollen", "dust", "mold", "mould", "latex", "bee", "wasp",
+                "insect", "pet", "cat", "dog", "animal", "grass", "tree",
+                "ragweed", "cockroach", "sunlight", "cold", "heat", "metal",
+                "nickel", "rubber",
+            }
+            lower = allergen_name.lower()
+            if any(k in lower for k in env_keywords):
+                allergen_type = "ENVIRONMENT"
+            elif any(k in lower for k in food_keywords):
+                allergen_type = "FOOD"
+            else:
+                allergen_type = "DRUG"
         return {
             "allergen": {
-                "allergenType": "DRUG",
+                "allergenType": allergen_type,
                 "codedAllergen": {"uuid": self.lookups.resolve_uuid("concept", allergen_name)},
             },
             "severity": {"uuid": self.lookups.resolve_uuid("concept", severity)},

@@ -25,11 +25,13 @@ from app.services.deterministic_classifier import sanitize_response_message, try
 from app.services.llm_reasoning import ConversationalDecision, LLMReasoningService
 from app.services.medications import MedicationService
 from app.services.observations import ObservationService
+from app.services.notes import NotesService
 from app.services.patients import PatientService
 from app.services.pending_actions import PendingActionStore
 from app.services.population import PopulationService
 from app.services.summaries import SummaryService
 from app.services.utils import now_iso
+from app.services.visits import VisitService
 
 
 class ChatAgentService:
@@ -47,6 +49,8 @@ class ChatAgentService:
         encounters: EncounterService,
         ingestion: IngestionService,
         population: PopulationService,
+        visits: "VisitService",
+        notes: "NotesService",
     ):
         self.reasoning = reasoning
         self.pending_store = pending_store
@@ -60,6 +64,8 @@ class ChatAgentService:
         self.encounters = encounters
         self.ingestion = ingestion
         self.population = population
+        self.visits = visits
+        self.notes = notes
 
     _HANDLER_MAP = handler_map()
 
@@ -277,6 +283,8 @@ class ChatAgentService:
             Path(record.metadata["file_path"]).unlink(missing_ok=True)
         elif record.intent == "sync_health_gorilla":
             result = [item.model_dump() for item in self.ingestion.sync_health_gorilla(record.metadata["match_resource"], record.metadata["conditions"])]
+        elif record.intent == "create_clinical_note":
+            result = self.notes.create(record.payload)
         else:
             raise ValidationError(f"Unsupported confirmation workflow for '{record.intent}'.")
 
@@ -1117,6 +1125,133 @@ class ChatAgentService:
             summary=f"Patient: {self.patients.format_patient_display(match_resource)}. Conditions: {len(preview['conditions'])}.",
             data=preview,
         )
+
+    def _handle_get_encounters(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
+        ensure_permission(actor, "read:clinical")
+        context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
+        data = self.encounters.list_for_patient(context["uuid"])
+        entries = data.get("entry", [])
+        workflow.append(WorkflowStep(status="completed", title="Encounters fetched", detail=f"{len(entries)} encounter(s) returned."))
+        if not entries:
+            msg = f"No encounters recorded for **{context['display']}**."
+        else:
+            lines = []
+            for e in entries[:20]:
+                res = e.get("resource", e)
+                enc_type = ((res.get("type") or [{}])[0].get("coding") or [{}])[0].get("display") or "Encounter"
+                period = res.get("period") or {}
+                start = (period.get("start") or "")[:10]
+                location = ((res.get("location") or [{}])[0].get("location") or {}).get("display", "")
+                loc_str = f" — {location}" if location else ""
+                lines.append(f"- **{enc_type}**{loc_str}: {start}")
+            total = len(entries)
+            suffix = f"\n\n*Showing {min(20, total)} of {total} encounters.*" if total > 20 else ""
+            msg = f"**{context['display']}** has {total} encounter(s):\n\n" + "\n".join(lines) + suffix
+        return ChatResponseEnvelope(intent="get_encounters", message=msg, workflow=workflow, patient_context=context, data=data)
+
+    def _handle_get_visits(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
+        ensure_permission(actor, "read:clinical")
+        context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
+        data = self.visits.list_for_patient(context["uuid"])
+        workflow.append(WorkflowStep(status="completed", title="Visits fetched", detail="Visit history returned."))
+        msg = f"**{context['display']}** visits:\n\n" + self.visits.format_visit_summary(data)
+        return ChatResponseEnvelope(intent="get_visits", message=msg, workflow=workflow, patient_context=context, data=data)
+
+    def _handle_create_clinical_note(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
+        ensure_permission(actor, "write:observation")
+        context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
+        note_text = (entities.get("note_text") or "").strip()
+        if not note_text:
+            raise ValidationError("Please provide the note content.")
+        note_type = entities.get("note_type", "note")
+        payload = self.notes.build_fhir_payload(context["uuid"], note_text, note_type)
+        pending = self.pending_store.create(
+            action_kind="write", intent="create_clinical_note", action=f"Create Clinical Note ({note_type.title()})",
+            permission="write:observation", endpoint="POST /ws/fhir2/R4/Observation",
+            payload=payload, patient_uuid=context["uuid"], prompt=prompt, session_id=None,
+        )
+        return self._preview_response(
+            intent="create_clinical_note",
+            message=f"Prepared clinical note for **{context['display']}**: _{note_text[:80]}{'...' if len(note_text) > 80 else ''}_",
+            workflow=workflow, pending=pending, patient_context=context,
+            summary=f"{note_type.title()}: {note_text[:120]}",
+        )
+
+    def _handle_search_drugs(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], **_: Any) -> ChatResponseEnvelope:
+        ensure_permission(actor, "read:clinical")
+        query = (entities.get("drug_query") or "").strip()
+        if not query:
+            raise ValidationError("Please provide a drug name to search.")
+        results = self.patients.client.search("drug", query)
+        workflow.append(WorkflowStep(status="completed", title="Drug search", detail=f"{len(results)} result(s) found."))
+        if not results:
+            return ChatResponseEnvelope(intent="search_drugs", message=f"No drugs found matching **{query}** in the OpenMRS formulary.", workflow=workflow)
+        lines = [f"- **{r.get('display', r.get('name', 'Unknown'))}**" + (f" — Concept: {(r.get('concept') or {}).get('display', '')}" if r.get('concept') else "") for r in results[:20]]
+        msg = f"Found {len(results)} drug(s) matching **{query}**:\n\n" + "\n".join(lines)
+        return ChatResponseEnvelope(intent="search_drugs", message=msg, workflow=workflow, data=results)
+
+    def _handle_search_providers(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], **_: Any) -> ChatResponseEnvelope:
+        ensure_permission(actor, "read:patient")
+        query = (entities.get("provider_query") or "").strip()
+        if query:
+            results = self.patients.client.search("provider", query)
+        else:
+            resp = self.patients.client.get("/ws/rest/v1/provider", params={"v": "default", "limit": 50})
+            results = resp.get("results", [])
+        workflow.append(WorkflowStep(status="completed", title="Provider search", detail=f"{len(results)} provider(s) found."))
+        if not results:
+            return ChatResponseEnvelope(intent="search_providers", message="No providers found.", workflow=workflow)
+        lines = [f"- **{r.get('display', 'Unknown')}**" + (f" (UUID: {r.get('uuid', '')})" if r.get('uuid') else "") for r in results[:30]]
+        msg = f"Found {len(results)} provider(s):\n\n" + "\n".join(lines)
+        return ChatResponseEnvelope(intent="search_providers", message=msg, workflow=workflow, data=results)
+
+    def _handle_search_locations(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], **_: Any) -> ChatResponseEnvelope:
+        ensure_permission(actor, "read:patient")
+        query = (entities.get("location_query") or "").strip()
+        if query:
+            results = self.patients.client.search("location", query)
+        else:
+            resp = self.patients.client.get("/ws/rest/v1/location", params={"v": "default", "limit": 50})
+            results = resp.get("results", [])
+        workflow.append(WorkflowStep(status="completed", title="Location search", detail=f"{len(results)} location(s) found."))
+        if not results:
+            return ChatResponseEnvelope(intent="search_locations", message="No locations found.", workflow=workflow)
+        lines = [f"- **{r.get('display', 'Unknown')}**" for r in results[:30]]
+        msg = f"Found {len(results)} location(s):\n\n" + "\n".join(lines)
+        return ChatResponseEnvelope(intent="search_locations", message=msg, workflow=workflow, data=results)
+
+    def _handle_get_programs(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], *, patient_uuid: str | None = None, session: Any = None, **_: Any) -> ChatResponseEnvelope:
+        ensure_permission(actor, "read:clinical")
+        # If patient is specified, show their enrollments; else list all programs
+        patient_q = entities.get("patient_query") or ""
+        if patient_q or patient_uuid:
+            context = self._resolve_patient_context(entities, patient_uuid, workflow, session=session)
+            data = self.patients.client.get("/ws/rest/v1/programenrollment", params={"patient": context["uuid"], "v": "full"})
+            enrollments = data.get("results", [])
+            workflow.append(WorkflowStep(status="completed", title="Programs fetched", detail=f"{len(enrollments)} enrollment(s)."))
+            if not enrollments:
+                return ChatResponseEnvelope(intent="get_programs", message=f"**{context['display']}** is not enrolled in any programs.", workflow=workflow, patient_context=context)
+            lines = []
+            for e in enrollments:
+                prog = (e.get("program") or {}).get("display", "Unknown Program")
+                enroll_date = (e.get("dateEnrolled") or "")[:10]
+                completed = (e.get("dateCompleted") or "")[:10] or "Active"
+                lines.append(f"- **{prog}**: enrolled {enroll_date}, status: {completed}")
+            return ChatResponseEnvelope(intent="get_programs", message=f"**{context['display']}** program enrollments:\n\n" + "\n".join(lines), workflow=workflow, patient_context=context, data=data)
+        else:
+            data = self.patients.client.get("/ws/rest/v1/program", params={"v": "default", "limit": 50})
+            programs = data.get("results", [])
+            workflow.append(WorkflowStep(status="completed", title="Programs listed", detail=f"{len(programs)} program(s) available."))
+            lines = [f"- **{p.get('display', 'Unknown')}**" for p in programs]
+            return ChatResponseEnvelope(intent="get_programs", message=f"Available programs ({len(programs)}):\n\n" + "\n".join(lines), workflow=workflow, data=data)
+
+    def _handle_get_encounter_types(self, prompt: str, entities: dict[str, Any], actor: Actor, workflow: list[WorkflowStep], **_: Any) -> ChatResponseEnvelope:
+        ensure_permission(actor, "read:clinical")
+        data = self.patients.client.get("/ws/rest/v1/encountertype", params={"v": "default", "limit": 100})
+        types = data.get("results", [])
+        workflow.append(WorkflowStep(status="completed", title="Encounter types", detail=f"{len(types)} type(s) fetched."))
+        lines = [f"- **{t.get('display', 'Unknown')}**" for t in types]
+        return ChatResponseEnvelope(intent="get_encounter_types", message=f"Available encounter types ({len(types)}):\n\n" + "\n".join(lines), workflow=workflow, data=data)
 
     # ── Internal support ──────────────────────────────────────────────
 
