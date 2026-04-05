@@ -22,4 +22,4 @@ def generate_openmrs_identifier(base_number: int) -> str:
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000+0000")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000+00:00")

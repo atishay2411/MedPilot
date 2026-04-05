@@ -84,12 +84,31 @@ class ChatAgentService:
         if det_decision is not None:
             decision = det_decision
         else:
+            # Inject active patient context into history so the LLM always knows
+            # which patient is loaded, even when the user doesn't repeat the name.
+            effective_history = list(conversation_history) if conversation_history else []
+            if patient_uuid:
+                try:
+                    pt_resource = self.patients.get_demographics(patient_uuid)
+                    pt_display = self.patients.format_patient_display(pt_resource)
+                    patient_ctx_msg = {
+                        "role": "system",
+                        "content": (
+                            f"Active patient context: {pt_display} (UUID: {patient_uuid}). "
+                            "Use this patient as the subject of any patient-specific request "
+                            "unless a different patient is explicitly named."
+                        ),
+                    }
+                    effective_history = [patient_ctx_msg] + effective_history
+                except Exception:
+                    pass
+
             # ── Pass 1: primary LLM decision ──────────────────────────────
             decision = self.reasoning.generate_conversational_response(
                 prompt,
                 session_state=None,
                 has_file=bool(attachment_path),
-                conversation_history=conversation_history,
+                conversation_history=effective_history,
             )
 
             # ── Pass 2 (conditional): fallback when intent is missing/unsupported ──
@@ -99,7 +118,7 @@ class ChatAgentService:
                     decision,
                     session_state=None,
                     has_file=bool(attachment_path),
-                    conversation_history=conversation_history,
+                    conversation_history=effective_history,
                 )
 
             # Sanitize LLM response to strip leaked prompt context

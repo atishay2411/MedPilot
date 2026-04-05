@@ -3,7 +3,19 @@ from __future__ import annotations
 from typing import Any
 
 from app.clients.openmrs import OpenMRSClient
+from app.core.exceptions import ValidationError
 from app.services.lookups import LookupService
+
+# Common reaction display names → more general aliases to try as fallbacks
+_REACTION_FALLBACKS: list[str] = [
+    "Other non-coded",
+    "Unknown",
+    "Other",
+    "Rash",
+    "Itching",
+    "Itchy skin",
+    "Pruritus",
+]
 
 
 class AllergyService:
@@ -51,13 +63,24 @@ class AllergyService:
                 allergen_type = "FOOD"
             else:
                 allergen_type = "DRUG"
+        # Resolve reaction concept; if the exact name isn't found, walk through
+        # progressively broader fallbacks so the allergy can still be saved.
+        reaction_uuid: str | None = None
+        for candidate in [reaction] + _REACTION_FALLBACKS:
+            try:
+                reaction_uuid = self.lookups.resolve_uuid("concept", candidate)
+                break
+            except ValidationError:
+                continue
+        reactions = [{"reaction": {"uuid": reaction_uuid}}] if reaction_uuid else []
+
         return {
             "allergen": {
                 "allergenType": allergen_type,
                 "codedAllergen": {"uuid": self.lookups.resolve_uuid("concept", allergen_name)},
             },
             "severity": {"uuid": self.lookups.resolve_uuid("concept", severity)},
-            "reactions": [{"reaction": {"uuid": self.lookups.resolve_uuid("concept", reaction)}}],
+            "reactions": reactions,
             "comment": comment or f"Patient reports {reaction} to {allergen_name}.",
         }
 

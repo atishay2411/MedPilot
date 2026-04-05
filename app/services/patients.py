@@ -171,6 +171,13 @@ class PatientService:
         if not query:
             raise ValidationError("A patient name, identifier, or UUID is required for this action.")
 
+        # Strip common prefixes the LLM sometimes includes in patient_query
+        _lower = query.lower().strip()
+        for _prefix in ("patient ", "pt ", "for patient ", "for pt "):
+            if _lower.startswith(_prefix):
+                query = query[len(_prefix):].strip()
+                break
+
         results = self.search(query)
         if not results and self._looks_like_identifier_or_uuid(query):
             results = self.search_by_identifier(query)

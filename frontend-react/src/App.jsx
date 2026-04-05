@@ -130,10 +130,15 @@ export default function App() {
       formData.append('prompt', textToSend);
       if (patientUuid) formData.append('patient_uuid', patientUuid);
       
-      const history = messages.map(m => ({
-        role: m.role,
-        content: typeof m.content === 'string' ? m.content : (m.content.message || '')
-      }));
+      const history = messages.map(m => {
+        if (typeof m.content === 'string') return { role: m.role, content: m.content };
+        // Include active patient name in assistant messages so the LLM always
+        // knows which patient was loaded, even after error responses.
+        const patientPrefix = m.content.patient_context?.display
+          ? `[Patient: ${m.content.patient_context.display}] `
+          : '';
+        return { role: m.role, content: patientPrefix + (m.content.message || '') };
+      });
       if (history.length > 0) formData.append('history', JSON.stringify(history.slice(-14)));
       if (selectedFile) formData.append('file', selectedFile);
 

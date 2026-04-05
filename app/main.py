@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,3 +21,11 @@ async def handle_domain_error(_, exc: MedPilotError):
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(_, exc: RequestValidationError):
     return JSONResponse(status_code=422, content={"ok": False, "error": exc.errors()})
+
+
+@app.exception_handler(Exception)
+async def handle_unexpected_error(_: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"ok": False, "error": f"An unexpected error occurred: {type(exc).__name__}: {exc}"},
+    )
