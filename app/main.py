@@ -11,7 +11,6 @@ from app.core.exceptions import MedPilotError
 settings = get_settings()
 app = FastAPI(title=settings.app_name)
 app.include_router(router)
-app.mount("/", StaticFiles(directory="app/static", html=True), name="static")
 
 
 @app.exception_handler(MedPilotError)
