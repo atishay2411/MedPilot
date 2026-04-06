@@ -1,5 +1,7 @@
 # MedPilot
 
+![MedPilot Overview](images/thumbnail.jpeg)
+
 MedPilot is a chat-first clinical copilot for OpenMRS. It combines a FastAPI backend, a React + Vite browser UI, deterministic intent routing, optional LLM reasoning, and direct OpenMRS REST/FHIR integrations so clinicians can search patients, review charts, record data, and safely prepare write actions from natural-language prompts.
 
 ---
@@ -78,6 +80,8 @@ MedPilot currently supports these workflow groups end-to-end:
 ### Frontend — React + Vite + Tailwind
 
 The UI lives in `frontend-react/`. During development the Vite dev server proxies all `/api` requests to the FastAPI backend at `localhost:8000`.
+
+![Main Screen](images/main_screen.jpeg)
 
 ### External systems
 
@@ -249,6 +253,8 @@ How many patients are there?
 Open chart for John Doe
 ```
 
+![List All Patients](images/list_all_patients.jpeg)
+
 ### 3. Review the chart
 
 ```
@@ -274,6 +280,14 @@ Add penicillin allergy, moderate severity, reaction rash
 Prescribe paracetamol 500 mg oral twice daily for 5 days
 Add note for this patient: Follow-up for chest pain
 ```
+
+MedPilot guides you through multi-turn creation flows conversationally:
+
+![Create Patient Conversation](images/example_quries.jpeg)
+
+Before any write is executed, MedPilot shows you the exact payload and waits for your confirmation:
+
+![Create Patient Confirmation](images/create_patient.jpeg)
 
 ### 5. Inspect audit output
 
